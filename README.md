@@ -1,14 +1,14 @@
-# Official code for SG-Mamba
+# Official code for AC-Mamba
 ![framework](./assets/framework.png)
 
-> **Temporal Micro-action Localization with Skeleton-Guided Mamba for Videofluoroscopic Swallowing Study**  \
+> **Temporal Micro-Action Localization with Anatomically Calibrated Mamba for Videofluoroscopic Swallowing Study**  \
 [Yirui Li](https://github.com/LStriving), [Kai Zhou](https://scholar.google.com/citations?user=58UyQ9cAAAAJ&hl=zh-CN&oi=ao), [Meng Dai](https://orcid.org/0000-0001-8275-572X), [Haiyu Zhou](https://loop.frontiersin.org/people/1320354/overview), [Jinwu Hu](https://scholar.google.com/citations?user=XmqjPi0AAAAJ&hl=en), [Yifan Yang](https://scholar.google.com/citations?user=veb6adUAAAAJ&hl=zh-CN&oi=ao), [Jian Chen](https://www.scholat.com/ellachen.en), [Fei Liu](https://scholar.google.com/citations?user=gC-YMYgAAAAJ&hl=en), [Hongming Cai](https://scholar.google.com/citations?user=B2BWq_EAAAAJ&hl=zh-CN&oi=ao), and [Mingkui Tan](https://tanmingkui.github.io/) \
 South China University of Technology, The Third Affiliated Hospital of Sun Yat-sen University, Guangdong Provincial People's Hospital 
 
 
 
 ## 📢 News
-- [2025/06/18] 🤗 Extractor checkpoints have been migrated to Hugging Face. You can obtain weights from [sg-mamba](https://huggingface.co/LStriving/sg-mamba).
+- [2025/06/18] 🤗 Extractor checkpoints have been migrated to Hugging Face. You can obtain weights from [ac-mamba](https://huggingface.co/LStriving/sg-mamba).
 - [2025/06/18] 🔥 Code is released.
 - [2025/05/15] 📕 The supplementary material is available at [supplementary](./assets/Supplementary.pdf).
 - [2025/05/13] 🔄 The repository is created.
@@ -18,21 +18,30 @@ South China University of Technology, The Third Affiliated Hospital of Sun Yat-s
 Videofluoroscopic Swallowing Study (VFSS)
 is the gold standard for assessing swallowing disorders,
 enabling detailed analysis of swallowing phases. Temporal
-micro-action localization in VFSS, which needs to identify
-and localize micro-actions (e.g., hyoid motion, {'<'}2s), is
-critical for diagnosis but faces significant challenges due
-to spatial ambiguity in noisy X-ray images and the extremely short duration of micro-actions. Existing methods
+micro-action localization in VFSS, which needs to identify and
+localize micro-actions (e.g., hyoid motion, {'<'}2s),
+is critical for diagnosis but faces significant challenges
+due to spatial ambiguity caused by tissue occlusion and
+visual blur from rapid anatomical motion. Existing methods
 handle brief actions by either localizing swallowing events
-before identifying micro-actions or trimming videos for focused analysis. However, they rely solely on appearance-
-based data that are highly susceptible to noise and back-
-ground interference. To this end, we propose Skeleton-
-Guided Mamba for Temporal Micro-Action Localization (SG-
-Mamba). Our method incorporates a novel skeleton modality that encodes the motion of key anatomical landmarks as
-heatmap sequences, effectively suppressing noise and enhancing anatomical focus. We further introduce a Channel-
-enhanced Cross-Mamba (CCM) module that fuses these
-skeleton representations with traditional appearance features, enabling efficient cross-modal spatiotemporal modeling with linear complexity. Our framework achieves state-
-of-the-art performance, surpassing the previous method by
-14.4% in average mAP.
+before identifying micro-actions or trimming videos for
+focused analysis. However, relying solely on appearance-based
+data makes them susceptible to low contrast and
+background interference. To this end, we propose Anatomi
+cally Calibrated Mamba for Temporal Micro-Action Localization (AC-Mamba).
+Our method incorporates a novel skeleton modality that encodes the motion of key anatomical
+landmarks as heatmap sequences, effectively enhancing
+anatomical focus and reducing spatial ambiguity.
+We further introduce an Anatomical Calibration Mamba (ACM)
+module as a cross-modal calibrator,
+leveraging the skeleton trajectory as a dynamic gate to
+calibrate the ambiguous appearance features. To further purify the features,
+we introduce a Redundancy Reduction Layer (RRL) to
+explicitly suppress static background information shared
+across channels. Our framework achieves state-of-the-art
+performance, surpassing the previous method by 14.4% in
+average mAP.
+
 
 ## Installation
 
@@ -54,8 +63,8 @@ The best performances are highlighted in **bold**.
 | Ruan et al.       | A2Net        |      | 70.9     | 67.5     | 62.5     | 55.0     | 46.1     | 31.6     | 15.8     | 49.9     |
 | Ruan et al.       | ActionMamba  |      | 77.9     | 75.0     | 69.5     | 62.2     | 54.8     | 45.2     | 28.9     | 59.1     |
 | Hyder et al.      | ActionMamba  | ✓    | 76.8     | 74.6     | 69.4     | 62.0     | 56.2     | 45.2     | 30.8     | 59.3     |
-| SG-Mamba (Ours)   | ActionFormer | ✓    | 82.7     | **80.1** | **75.9** | 67.1 | 58.4 | 49.2 | 33.5 | 63.8 |
-| SG-Mamba (Ours)   | ActionMamba  | ✓    | **83.1**   | 78.5     | **74.6**   | **67.9**   | **59.0**   | **50.0**   | **37.2**   | **64.3**   |
+| AC-Mamba (Ours)   | ActionFormer | ✓    | 82.7     | **80.1** | **75.9** | 67.1 | 58.4 | 49.2 | 33.5 | 63.8 |
+| AC-Mamba (Ours)   | ActionMamba  | ✓    | **83.1**   | 78.5     | **74.6**   | **67.9**   | **59.0**   | **50.0**   | **37.2**   | **64.3**   |
 
 
 
