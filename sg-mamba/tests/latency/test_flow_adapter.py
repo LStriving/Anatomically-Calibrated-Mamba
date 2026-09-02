@@ -1,11 +1,17 @@
-import pytest
+import numpy as np
 
 from experiments.latency.adapters.flow import FlowExtractAdapter
-from experiments.latency.contracts import Payload, StructuralRunError
+from experiments.latency.contracts import Payload
 
 
-def test_flow_adapter_requires_the_project_tvl1_factory():
-    """Replacing unavailable TV-L1 with a different algorithm would invalidate comparability."""
+def test_flow_adapter_produces_tvl1_flow_for_decoded_frames():
+    """Removing TV-L1 extraction would leave downstream flow features absent."""
     adapter = FlowExtractAdapter()
-    with pytest.raises(StructuralRunError, match="DualTVL1"):
-        adapter.prepare({})
+    adapter.prepare({})
+    try:
+        frames = [np.zeros((16, 16, 3), dtype=np.uint8), np.ones((16, 16, 3), dtype=np.uint8)]
+        flow = adapter.run(Payload({"frames": frames}), {}).require("flow")
+        assert flow.shape == (2, 128, 128, 2)
+        assert flow.dtype == np.float32
+    finally:
+        adapter.close()

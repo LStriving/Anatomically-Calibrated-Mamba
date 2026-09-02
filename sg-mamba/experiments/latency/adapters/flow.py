@@ -7,6 +7,10 @@ from ..contracts import StructuralRunError
 class FlowExtractAdapter:
     name = "flow_extract"
 
+    def __init__(self, width=128, height=128):
+        self.width = width
+        self.height = height
+
     def prepare(self, context):
         try:
             import cv2
@@ -26,9 +30,13 @@ class FlowExtractAdapter:
         if len(frames) < 2:
             raise StructuralRunError("TV-L1 flow requires at least two decoded frames")
         flows = []
-        previous = self._cv2.cvtColor(frames[0], self._cv2.COLOR_BGR2GRAY)
+        previous = self._gray(frames[0])
         for frame in frames:
-            current = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2GRAY)
+            current = self._gray(frame)
             flows.append(self._tvl1.calc(previous, current, None).astype(np.float32))
             previous = current
         return payload.with_value("flow", np.stack(flows))
+
+    def _gray(self, frame):
+        resized = self._cv2.resize(frame, (self.width, self.height))
+        return self._cv2.cvtColor(resized, self._cv2.COLOR_BGR2GRAY)
