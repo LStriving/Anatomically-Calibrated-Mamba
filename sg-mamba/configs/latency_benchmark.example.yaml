@@ -1,0 +1,12 @@
+mode: benchmark
+weights_mode: required
+stages:
+  - decode
+  - coarse_detector
+  - flow_extract
+  - i3d_extract
+  - keypoint_extract
+  - kalman_smooth
+  - skeleton_encode
+  - fine_detector
+  - postprocess
