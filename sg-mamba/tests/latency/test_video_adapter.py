@@ -17,3 +17,12 @@ def test_video_adapter_decodes_real_vfss_video():
     frames = payload.require("frames")
     assert len(frames) > 1
     assert payload.require("fps") > 0
+
+
+@pytest.mark.skipif(not REAL_VIDEO.is_file(), reason="local VFSS video is unavailable")
+def test_video_adapter_limits_frames_only_when_requested():
+    """Ignoring max_frames would turn a smoke run into a full benchmark."""
+    payload = VideoDecodeAdapter(max_frames=3).run(
+        Payload({"video": {"id": "vfss", "path": str(REAL_VIDEO)}}), {}
+    )
+    assert len(payload.require("frames")) == 3

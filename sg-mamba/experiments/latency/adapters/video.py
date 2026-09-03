@@ -5,6 +5,11 @@ from ..contracts import RecoverableVideoError
 class VideoDecodeAdapter:
     name = "decode"
 
+    def __init__(self, max_frames=None):
+        if max_frames is not None and max_frames < 1:
+            raise ValueError("max_frames must be positive")
+        self.max_frames = max_frames
+
     def prepare(self, context):
         return None
 
@@ -27,6 +32,8 @@ class VideoDecodeAdapter:
             if not ok:
                 break
             frames.append(frame)
+            if self.max_frames is not None and len(frames) >= self.max_frames:
+                break
         capture.release()
         if not frames or fps <= 0:
             raise RecoverableVideoError("video has no decodable frames or fps")
