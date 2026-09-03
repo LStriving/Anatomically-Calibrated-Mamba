@@ -32,6 +32,16 @@ def run_benchmark(config, manifest, adapters, output_dir):
             except RecoverableVideoError as error:
                 failures.append({"video_id": video["id"], "failure_stage": stage, "failure_message": str(error)})
                 rows.append({"video_id": video["id"], "status": "failed", "failure_stage": stage, "failure_message": str(error)})
+    except StructuralRunError as error:
+        write_meta_report(output_dir, {
+            "args": config,
+            "scope": "validation" if config.get("mode") == "validate" else "partial_pipeline",
+            "successes": successes,
+            "failures": failures,
+            "structural_failure": {"message": str(error), "type": type(error).__name__},
+            "artifacts": [],
+        })
+        raise
     finally:
         for adapter in reversed(adapters): adapter.close()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
