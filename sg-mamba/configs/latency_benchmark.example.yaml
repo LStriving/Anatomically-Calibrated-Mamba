@@ -1,0 +1,52 @@
+# Supply real model/predictor instances through the listed factory kwargs.
+# Construction, checkpoint loading, and warm-up occur outside per-video timing.
+mode: benchmark
+weights_mode: required
+stages:
+  - name: decode
+    factory: experiments.latency.adapters.video:VideoDecodeAdapter
+    kwargs: {}
+  - name: flow_extract
+    factory: experiments.latency.adapters.flow:FlowExtractAdapter
+    kwargs:
+      width: 128
+      height: 128
+  - name: i3d_extract
+    factory: experiments.latency.adapters.i3d:make_i3d_adapter
+    kwargs:
+      rgb_checkpoint: pretrained/pretrained_swallow_i3d.pth
+      flow_checkpoint: pretrained/flow_imagenet.pt
+      weights_mode: required
+  - name: coarse_detector
+    factory: experiments.latency.adapters.detectors:make_coarse_detector_from_config
+    kwargs:
+      config_path: configs/mamba_swallow_i3d_eval_stage1.yaml
+      checkpoint: ckpts/ckpt_swallow/mamba_swallow_i3d_stage1_mamba_swallow_stage1_2_0.0001/epoch_024_0.82621.pth.tar
+      weights_mode: required
+  - name: keypoint_extract
+    factory: experiments.latency.adapters.keypoints:make_keypoint_adapter
+    kwargs:
+      # Matches libs/core/config.py; this traced model is required for a real run.
+      model_path: ckpts/best_model_trace.pt
+      sigma: 4
+  - name: kalman_smooth
+    factory: experiments.latency.adapters.keypoints:KalmanSmoothAdapter
+    kwargs: {}
+  - name: skeleton_encode
+    factory: experiments.latency.adapters.keypoints:make_skeleton_adapter
+    kwargs:
+      # Mirrors VideoKeypointProcessor.infer_heatmaps after the separate Kalman stage.
+      sigma: 4
+      crop_mode: auto
+  - name: fine_detector
+    factory: experiments.latency.adapters.detectors:make_two_tower_detector_from_config
+    kwargs:
+      config_path: configs/sg-mamba-stage2.yaml
+      config2_path: configs/sg-mamba-stage2-heatmap.yaml
+      checkpoint: ckpts/ckpt_swallow/mamba_swallow_i3d_stage1_mamba_swallow_stage1_2_0.0001/epoch_024_0.82621.pth.tar
+      tower_name: LogitsAvg
+      weights_mode: required
+  - name: postprocess
+    factory: experiments.latency.adapters.detectors:PostprocessAdapter
+    kwargs:
+      segment_duration: 4.004
