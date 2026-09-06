@@ -1,8 +1,9 @@
 """Contract tests for raw-video latency pipeline adapters."""
 import numpy as np
 import torch
+import pytest
 
-from experiments.latency.contracts import Payload
+from experiments.latency.contracts import Payload, StructuralRunError
 
 
 class _FeatureModel:
@@ -23,6 +24,18 @@ def test_i3d_adapter_emits_rgb_and_flow_features_from_eight_frame_windows():
     assert result.require("rgb_i3d_features").shape == (1, 3)
     assert result.require("flow_i3d_features").shape == (1, 2)
     assert np.allclose(result.require("rgb_i3d_features"), -1 / 255, atol=1e-6)
+
+
+def test_i3d_factory_rejects_missing_required_checkpoints(tmp_path):
+    """Treating absent required weights as random weights would invalidate a benchmark run."""
+    from experiments.latency.adapters.i3d import make_i3d_adapter
+
+    with pytest.raises(StructuralRunError, match="checkpoint does not exist"):
+        make_i3d_adapter(
+            rgb_checkpoint=tmp_path / "missing-rgb.pth",
+            flow_checkpoint=tmp_path / "missing-flow.pth",
+            weights_mode="required",
+        )
 
 
 class _KeypointProcessor:

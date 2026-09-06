@@ -15,8 +15,11 @@ stages:
       width: 128
       height: 128
   - name: i3d_extract
-    factory: experiments.latency.adapters.i3d:I3DExtractAdapter
-    kwargs: {}
+    factory: experiments.latency.adapters.i3d:make_i3d_adapter
+    kwargs:
+      rgb_checkpoint: pretrained/pretrained_swallow_i3d.pth
+      flow_checkpoint: pretrained/flow_imagenet.pt
+      weights_mode: required
   - name: keypoint_extract
     factory: experiments.latency.adapters.keypoints:KeypointExtractAdapter
     kwargs: {}

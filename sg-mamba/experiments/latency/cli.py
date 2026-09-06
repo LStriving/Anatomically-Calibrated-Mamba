@@ -9,6 +9,7 @@ import yaml
 from .adapters.flow import FlowExtractAdapter
 from .adapters.video import VideoDecodeAdapter
 from .contracts import StructuralRunError
+from .metadata import write_meta_report
 from .runner import run_benchmark
 
 
@@ -89,7 +90,20 @@ def main(argv=None):
         config["mode"] = args.mode
     if args.weights_mode is not None:
         config["weights_mode"] = args.weights_mode
-    return run_benchmark(config, load_manifest(args.manifest), build_adapters(config), args.output_dir)
+    try:
+        manifest = load_manifest(args.manifest)
+        adapters = build_adapters(config)
+    except StructuralRunError as error:
+        write_meta_report(args.output_dir, {
+            "args": config,
+            "scope": "validation" if config.get("mode") == "validate" else "partial_pipeline",
+            "successes": [],
+            "failures": [],
+            "structural_failure": {"message": str(error), "type": type(error).__name__},
+            "artifacts": [],
+        })
+        raise
+    return run_benchmark(config, manifest, adapters, args.output_dir)
 
 
 if __name__ == "__main__":
