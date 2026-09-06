@@ -28,6 +28,14 @@ def test_runner_preserves_success_when_one_video_is_recoverable(tmp_path):
     assert [item["video_id"] for item in report["successes"]] == ["good"]
     assert [item["video_id"] for item in report["failures"]] == ["bad"]
     assert any(item["name"].startswith("latency_results_") for item in report["artifacts"])
+    assert any(item["name"].startswith("latency_summary_") for item in report["artifacts"])
+    assert any(item["name"].startswith("predictions_") for item in report["artifacts"])
+    summary = json.loads(next(tmp_path.glob("latency_summary_*.json")).read_text(encoding="utf-8"))
+    assert summary["attempted"] == 2
+    assert summary["succeeded"] == 1
+    assert summary["failed"] == 1
+    assert report["preparation"]["duration_ms"] >= 0
+    assert report["preparation"]["stages"] == [{"stage": "decode", "status": "prepared"}]
 
 
 class BrokenPrepare:

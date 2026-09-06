@@ -80,7 +80,13 @@ def test_skeleton_and_detector_adapters_keep_model_outputs_in_named_payload_fiel
     from experiments.latency.adapters.detectors import CoarseDetectorAdapter, FineDetectorAdapter
     from experiments.latency.adapters.keypoints import SkeletonEncodeAdapter
 
-    payload = Payload({"smoothed_keypoints": np.zeros((2, 8, 2)), "keypoint_confidences": np.ones((2, 8))})
+    evaluator_item = {
+        "video_id": "video#0", "feats": np.zeros((4, 2)),
+        "feat_stride": 1, "feat_num_frames": 1,
+    }
+    payload = Payload({"smoothed_keypoints": np.zeros((2, 8, 2)), "keypoint_confidences": np.ones((2, 8)),
+                       "coarse_input": [evaluator_item],
+                       "fine_input": [([evaluator_item][0], dict(evaluator_item))]})
     skeleton = SkeletonEncodeAdapter(encoder=lambda points, confidence: np.ones((2, 4, 4))).run(payload, {})
     coarse = CoarseDetectorAdapter(predictor=lambda value, context: [{"center": 2.0}]).run(skeleton, {})
     fine = FineDetectorAdapter(predictor=lambda value, context: {"score": [0.8]}).run(coarse, {})
@@ -88,6 +94,56 @@ def test_skeleton_and_detector_adapters_keep_model_outputs_in_named_payload_fiel
     assert skeleton.require("skeleton_features").shape == (2, 4, 4)
     assert coarse.require("coarse_segments") == [{"center": 2.0}]
     assert fine.require("fine_predictions") == {"score": [0.8]}
+
+
+def test_detectors_build_real_evaluator_inputs_from_feature_payload():
+    """Raw-video stages must connect to the evaluator without temporary feature files."""
+    from experiments.latency.adapters.detectors import CoarseDetectorAdapter, FineDetectorAdapter
+
+    payload = Payload({
+        "video": {"id": "video", "path": "video.avi", "duration": 2.0},
+        "fps": 10.0,
+        "rgb_i3d_features": np.zeros((4, 2), dtype=np.float32),
+        "flow_i3d_features": np.ones((4, 2), dtype=np.float32),
+        "skeleton_features": np.ones((4, 4, 4), dtype=np.float32),
+    })
+    seen = {}
+
+    def coarse_predictor(batch, _):
+        seen["coarse"] = batch
+        return []
+
+    def fine_predictor(batch, _):
+        seen["fine"] = batch
+        return []
+
+    payload = CoarseDetectorAdapter(coarse_predictor, feat_stride=3, num_frames=8).run(payload, {})
+    payload = FineDetectorAdapter(fine_predictor, feat_stride=3, num_frames=8, heatmap_dim=4).run(payload, {})
+
+    assert seen["coarse"][0]["feats"].shape == (4, 4)
+    assert seen["fine"][0][0]["feats"].shape[0] == 4
+    assert seen["fine"][0][1]["feats"].shape[0] == 4
+    assert seen["fine"][0][0]["video_id"] == "video#0"
+
+
+def test_fine_detector_normalizes_model_results_for_postprocess():
+    from experiments.latency.adapters.detectors import FineDetectorAdapter
+
+    payload = Payload({
+        "video": {"id": "video", "path": "video.avi", "duration": 2.0},
+        "fine_input": [({"video_id": "video#0", "feats": np.zeros((2, 4)),
+                         "feat_stride": 3, "feat_num_frames": 8},
+                        {"video_id": "video#0", "feats": np.zeros((2, 4)),
+                         "feat_stride": 3, "feat_num_frames": 8})],
+    })
+    result = FineDetectorAdapter(
+        predictor=lambda batch, _: [{"video_id": "video#0", "segments": np.array([[1.0, 2.0]]),
+                                     "scores": np.array([0.8]), "labels": np.array([3])}]
+    ).run(payload, {}).require("fine_predictions")
+
+    assert result["seg-id"] == ["video#0"]
+    assert result["t-start"] == [1.0]
+    assert result["label"] == [3]
 
 
 def test_reference_skeleton_adapter_preserves_heatmap_branch_geometry():

@@ -38,7 +38,7 @@ def build_adapters(config):
     adapters = []
     for stage in config.get("stages", []):
         if isinstance(stage, dict):
-            adapters.append(_build_factory_stage(stage))
+            adapters.append(_build_factory_stage(stage, config.get("weights_mode")))
             continue
         if stage == "decode":
             adapters.append(VideoDecodeAdapter(max_frames=config.get("max_frames")))
@@ -55,12 +55,15 @@ def build_adapters(config):
     return adapters
 
 
-def _build_factory_stage(stage):
+def _build_factory_stage(stage, weights_mode=None):
     name = stage.get("name")
     factory_path = stage.get("factory")
     kwargs = stage.get("kwargs", {})
     if not isinstance(name, str) or not isinstance(factory_path, str) or not isinstance(kwargs, dict):
         raise StructuralRunError("Configured stage requires string name, string factory, and mapping kwargs")
+    kwargs = dict(kwargs)
+    if weights_mode is not None and "weights_mode" in kwargs:
+        kwargs["weights_mode"] = weights_mode
     try:
         module_name, attribute = factory_path.split(":", 1)
         factory = getattr(importlib.import_module(module_name), attribute)
