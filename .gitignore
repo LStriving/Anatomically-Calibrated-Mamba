@@ -183,3 +183,5 @@ publish_model_to_hf.py
 #.idea/
 
 .vscode/
+
+docs/superpowers/
