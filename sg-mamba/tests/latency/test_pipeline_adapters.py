@@ -88,3 +88,30 @@ def test_skeleton_and_detector_adapters_keep_model_outputs_in_named_payload_fiel
     assert skeleton.require("skeleton_features").shape == (2, 4, 4)
     assert coarse.require("coarse_segments") == [{"center": 2.0}]
     assert fine.require("fine_predictions") == {"score": [0.8]}
+
+
+def test_reference_skeleton_adapter_preserves_heatmap_branch_geometry():
+    """Replacing the reference heatmap encoding would feed a different stage-2 representation."""
+    from experiments.latency.adapters.keypoints import make_skeleton_adapter
+
+    adapter = make_skeleton_adapter(sigma=0.6, crop_mode="none")
+    payload = Payload({
+        "smoothed_keypoints": np.full((2, 8, 2), 0.5, dtype=np.float32),
+        "keypoint_confidences": np.ones((2, 8), dtype=np.float32),
+        "frame_height": 12,
+        "frame_width": 20,
+    })
+
+    features = adapter.run(payload, {}).require("skeleton_features")
+
+    assert features.shape == (2, 12, 20)
+    assert features.dtype == np.float32
+    assert float(features.max()) == pytest.approx(1.0)
+
+
+def test_keypoint_factory_reports_a_missing_traced_checkpoint_before_loading_models(tmp_path):
+    """A missing landmark model must stop the run before it can emit invalid keypoints."""
+    from experiments.latency.adapters.keypoints import make_keypoint_adapter
+
+    with pytest.raises(StructuralRunError, match="checkpoint does not exist"):
+        make_keypoint_adapter(model_path=tmp_path / "missing-keypoints.pt")

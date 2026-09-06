@@ -21,14 +21,20 @@ stages:
       flow_checkpoint: pretrained/flow_imagenet.pt
       weights_mode: required
   - name: keypoint_extract
-    factory: experiments.latency.adapters.keypoints:KeypointExtractAdapter
-    kwargs: {}
+    factory: experiments.latency.adapters.keypoints:make_keypoint_adapter
+    kwargs:
+      # Matches libs/core/config.py; this traced model is required for a real run.
+      model_path: ckpts/best_model_trace.pt
+      sigma: 4
   - name: kalman_smooth
     factory: experiments.latency.adapters.keypoints:KalmanSmoothAdapter
     kwargs: {}
   - name: skeleton_encode
-    factory: experiments.latency.adapters.keypoints:SkeletonEncodeAdapter
-    kwargs: {}
+    factory: experiments.latency.adapters.keypoints:make_skeleton_adapter
+    kwargs:
+      # Mirrors VideoKeypointProcessor.infer_heatmaps after the separate Kalman stage.
+      sigma: 4
+      crop_mode: auto
   - name: fine_detector
     factory: experiments.latency.adapters.detectors:FineDetectorAdapter
     kwargs: {}

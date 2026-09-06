@@ -43,6 +43,7 @@ def run_benchmark(config, manifest, adapters, output_dir):
             "successes": successes,
             "failures": failures,
             "structural_failure": {"message": str(error), "type": type(error).__name__},
+            "adapter_status": _adapter_status(adapters),
             "artifacts": [],
         })
         raise
@@ -61,6 +62,7 @@ def run_benchmark(config, manifest, adapters, output_dir):
         "failures": failures,
         "warmup_video_id": warmup_video_id,
         "aggregate_latency_ms": aggregate,
+        "adapter_status": _adapter_status(adapters),
         "artifacts": [{"path": results, "purpose": "latency results"}],
     })
 
@@ -74,6 +76,20 @@ def _aggregate_successes(successes, mode):
         for name in stage_names
     }
     return warmup_video_id, {"sample_count": len(measured), "stages_ms": stages}
+
+
+def _adapter_status(adapters):
+    """Expose checkpoint state without treating a missing attribute as a claim."""
+    status = []
+    for adapter in adapters:
+        if not hasattr(adapter, "weights_loaded") and not hasattr(adapter, "checkpoint_warnings"):
+            continue
+        status.append({
+            "name": adapter.name,
+            "weights_loaded": getattr(adapter, "weights_loaded", None),
+            "checkpoint_warnings": list(getattr(adapter, "checkpoint_warnings", [])),
+        })
+    return status
 
 
 def _cuda_synchronize():

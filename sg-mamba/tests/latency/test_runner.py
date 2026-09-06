@@ -53,6 +53,11 @@ class PassThrough:
     def run(self, payload, context): return payload.with_value("frames", [1])
 
 
+class WeightedPassThrough(PassThrough):
+    weights_loaded = False
+    checkpoint_warnings = ["using audited test fallback"]
+
+
 def test_runner_excludes_first_success_from_benchmark_aggregate(tmp_path):
     """Including the first successful video would count model warm-up as benchmark latency."""
     report_path = run_benchmark(
@@ -65,3 +70,18 @@ def test_runner_excludes_first_success_from_benchmark_aggregate(tmp_path):
     assert report["warmup_video_id"] == "warmup"
     assert report["aggregate_latency_ms"]["sample_count"] == 1
     assert set(report["aggregate_latency_ms"]["stages_ms"]) == {"decode"}
+
+
+def test_runner_records_adapter_weight_status_and_warnings(tmp_path):
+    """Dropping a degraded model's warning would make its timings look like validated inference."""
+    report_path = run_benchmark(
+        {"mode": "validate", "weights_mode": "skip"},
+        [{"id": "v", "path": "v.avi"}], [WeightedPassThrough()], tmp_path,
+    )
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert report["adapter_status"] == [{
+        "name": "decode", "weights_loaded": False,
+        "checkpoint_warnings": ["using audited test fallback"],
+    }]
