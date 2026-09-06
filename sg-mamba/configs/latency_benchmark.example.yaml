@@ -1,12 +1,35 @@
+# Supply real model/predictor instances through the listed factory kwargs.
+# Construction, checkpoint loading, and warm-up occur outside per-video timing.
 mode: benchmark
 weights_mode: required
 stages:
-  - decode
-  - coarse_detector
-  - flow_extract
-  - i3d_extract
-  - keypoint_extract
-  - kalman_smooth
-  - skeleton_encode
-  - fine_detector
-  - postprocess
+  - name: decode
+    factory: experiments.latency.adapters.video:VideoDecodeAdapter
+    kwargs: {}
+  - name: coarse_detector
+    factory: experiments.latency.adapters.detectors:CoarseDetectorAdapter
+    kwargs: {}
+  - name: flow_extract
+    factory: experiments.latency.adapters.flow:FlowExtractAdapter
+    kwargs:
+      width: 128
+      height: 128
+  - name: i3d_extract
+    factory: experiments.latency.adapters.i3d:I3DExtractAdapter
+    kwargs: {}
+  - name: keypoint_extract
+    factory: experiments.latency.adapters.keypoints:KeypointExtractAdapter
+    kwargs: {}
+  - name: kalman_smooth
+    factory: experiments.latency.adapters.keypoints:KalmanSmoothAdapter
+    kwargs: {}
+  - name: skeleton_encode
+    factory: experiments.latency.adapters.keypoints:SkeletonEncodeAdapter
+    kwargs: {}
+  - name: fine_detector
+    factory: experiments.latency.adapters.detectors:FineDetectorAdapter
+    kwargs: {}
+  - name: postprocess
+    factory: experiments.latency.adapters.detectors:PostprocessAdapter
+    kwargs:
+      segment_duration: 4.004

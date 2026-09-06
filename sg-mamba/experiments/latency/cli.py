@@ -1,5 +1,6 @@
 """Config and manifest entry point for auditable latency runs."""
 import argparse
+import importlib
 import json
 from pathlib import Path
 
@@ -35,6 +36,9 @@ def load_manifest(path):
 def build_adapters(config):
     adapters = []
     for stage in config.get("stages", []):
+        if isinstance(stage, dict):
+            adapters.append(_build_factory_stage(stage))
+            continue
         if stage == "decode":
             adapters.append(VideoDecodeAdapter(max_frames=config.get("max_frames")))
         elif stage == "flow_extract":
@@ -48,6 +52,28 @@ def build_adapters(config):
     if not adapters:
         raise StructuralRunError("Latency config must declare at least one stage")
     return adapters
+
+
+def _build_factory_stage(stage):
+    name = stage.get("name")
+    factory_path = stage.get("factory")
+    kwargs = stage.get("kwargs", {})
+    if not isinstance(name, str) or not isinstance(factory_path, str) or not isinstance(kwargs, dict):
+        raise StructuralRunError("Configured stage requires string name, string factory, and mapping kwargs")
+    try:
+        module_name, attribute = factory_path.split(":", 1)
+        factory = getattr(importlib.import_module(module_name), attribute)
+    except (ValueError, ImportError, AttributeError) as error:
+        raise StructuralRunError("Unable to import stage factory: {}".format(factory_path)) from error
+    try:
+        adapter = factory(**kwargs)
+    except TypeError as error:
+        raise StructuralRunError("Unable to construct stage {} from {}".format(name, factory_path)) from error
+    if getattr(adapter, "name", None) != name:
+        raise StructuralRunError("Stage factory {} produced {} rather than {}".format(
+            factory_path, getattr(adapter, "name", None), name
+        ))
+    return adapter
 
 
 def main(argv=None):

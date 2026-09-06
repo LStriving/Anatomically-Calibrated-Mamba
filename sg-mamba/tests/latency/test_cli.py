@@ -27,3 +27,20 @@ def test_cli_runs_configured_decode_smoke_and_records_overrides(tmp_path):
     assert report["args"]["mode"] == "smoke"
     assert report["args"]["weights_mode"] == "skip"
     assert report["successes"][0]["video_id"] == "vfss-smoke"
+
+
+def test_build_adapters_constructs_stage_from_explicit_factory_path():
+    """Ignoring explicit factory arguments would silently run the wrong stage configuration."""
+    from experiments.latency.cli import build_adapters
+
+    adapters = build_adapters({
+        "stages": [{
+            "name": "decode",
+            "factory": "experiments.latency.adapters.video:VideoDecodeAdapter",
+            "kwargs": {"max_frames": 2},
+        }],
+    })
+
+    assert len(adapters) == 1
+    assert adapters[0].name == "decode"
+    assert adapters[0].max_frames == 2
