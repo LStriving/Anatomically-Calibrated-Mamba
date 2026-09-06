@@ -44,3 +44,24 @@ def test_runner_writes_audit_report_before_reraising_structural_error(tmp_path):
     assert len(reports) == 1
     report = json.loads(reports[0].read_text(encoding="utf-8"))
     assert report["structural_failure"]["message"] == "factory unavailable"
+
+
+class PassThrough:
+    name = "decode"
+    def prepare(self, context): pass
+    def close(self): pass
+    def run(self, payload, context): return payload.with_value("frames", [1])
+
+
+def test_runner_excludes_first_success_from_benchmark_aggregate(tmp_path):
+    """Including the first successful video would count model warm-up as benchmark latency."""
+    report_path = run_benchmark(
+        {"mode": "benchmark", "weights_mode": "skip"},
+        [{"id": "warmup", "path": "one.avi"}, {"id": "measured", "path": "two.avi"}],
+        [PassThrough()], tmp_path,
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert report["warmup_video_id"] == "warmup"
+    assert report["aggregate_latency_ms"]["sample_count"] == 1
+    assert set(report["aggregate_latency_ms"]["stages_ms"]) == {"decode"}
