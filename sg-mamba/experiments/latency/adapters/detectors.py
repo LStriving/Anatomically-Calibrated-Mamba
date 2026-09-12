@@ -140,9 +140,18 @@ def make_two_tower_detector_adapter(config, config2, checkpoint, tower_name,
     return adapter
 
 
-def make_two_tower_detector_from_config(config_path, config2_path, checkpoint, tower_name,
-                                        weights_mode="required", device=None):
+def make_two_tower_detector_from_config(config_path, config2_path, checkpoint=None, tower_name="LogitsAvg",
+                                        weights_mode="required", device=None, actions=None):
     """CLI-friendly eval2tower factory using the evaluator's two YAML configs."""
+    if actions is not None:
+        return make_action_two_tower_detector_from_config(
+            config_path=config_path,
+            config2_path=config2_path,
+            actions=actions,
+            tower_name=tower_name,
+            weights_mode=weights_mode,
+            device=device,
+        )
     from libs.core import load_config
 
     return make_two_tower_detector_adapter(

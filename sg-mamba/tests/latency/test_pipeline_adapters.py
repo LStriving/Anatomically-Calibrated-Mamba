@@ -192,6 +192,36 @@ def test_action_two_tower_ensemble_builds_one_model_per_action_and_merges_result
     assert len(result["label"]) == 7
 
 
+def test_legacy_two_tower_factory_delegates_actions_to_action_ensemble(monkeypatch):
+    """Older configs may keep the single-model factory path while adding action checkpoints."""
+    from experiments.latency.adapters import detectors
+
+    seen = {}
+
+    def fake_action_factory(**kwargs):
+        seen.update(kwargs)
+        return "adapter"
+
+    monkeypatch.setattr(detectors, "make_action_two_tower_detector_from_config", fake_action_factory)
+    actions = [{"name": str(index), "checkpoint": str(index)} for index in range(7)]
+
+    result = detectors.make_two_tower_detector_from_config(
+        config_path="visual.yaml",
+        config2_path="heatmap.yaml",
+        checkpoint=None,
+        tower_name="LogitsAvg",
+        weights_mode="skip",
+        actions=actions,
+    )
+
+    assert result == "adapter"
+    assert seen["actions"] == actions
+    assert seen["config_path"] == "visual.yaml"
+    assert seen["config2_path"] == "heatmap.yaml"
+    assert seen["tower_name"] == "LogitsAvg"
+    assert seen["weights_mode"] == "skip"
+
+
 def test_reference_skeleton_adapter_preserves_heatmap_branch_geometry():
     """Replacing the reference heatmap encoding would feed a different stage-2 representation."""
     from experiments.latency.adapters.keypoints import make_skeleton_adapter
