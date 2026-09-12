@@ -542,7 +542,7 @@ def _prediction_columns(results, fine_input, payload):
 
 
 def _result_segment_id(video_id, segment_index, count):
-    if "#" in video_id and count == 1:
+    if "#" in video_id:
         return video_id
     return "{}#{}".format(video_id, segment_index)
 

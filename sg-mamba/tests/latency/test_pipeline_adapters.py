@@ -209,6 +209,30 @@ def test_fine_detector_normalizes_model_results_for_postprocess():
     assert result["label"] == [3]
 
 
+def test_fine_detector_keeps_coarse_segment_id_for_multiple_fine_proposals():
+    """All proposals from one fine clip must map back to the same coarse segment center."""
+    from experiments.latency.adapters.detectors import FineDetectorAdapter, PostprocessAdapter
+
+    payload = Payload({
+        "video": {"id": "video", "path": "video.avi", "duration": 2.0},
+        "fine_input": [({"video_id": "video#0", "feats": np.zeros((2, 4)),
+                         "feat_stride": 3, "feat_num_frames": 8},
+                        {"video_id": "video#0", "feats": np.zeros((2, 4)),
+                         "feat_stride": 3, "feat_num_frames": 8})],
+        "segment_centers": {"video#0": 10.0},
+    })
+    payload = FineDetectorAdapter(
+        predictor=lambda batch, _: [{"video_id": "video#0", "segments": np.array([[1.0, 2.0], [2.0, 3.0]]),
+                                     "scores": np.array([0.8, 0.7]), "labels": np.array([3, 3])}]
+    ).run(payload, {})
+
+    result = payload.require("fine_predictions")
+    assert result["seg-id"] == ["video#0", "video#0"]
+
+    postprocessed = PostprocessAdapter(segment_duration=4.0).run(payload, {}).require("predictions")
+    assert postprocessed["t-start"] == [9.0, 10.0]
+
+
 def test_action_two_tower_ensemble_builds_one_model_per_action_and_merges_results():
     """Using one stage-2 checkpoint for all classes would miss eval2stage's per-action model contract."""
     from experiments.latency.adapters.detectors import make_action_two_tower_detector_adapter
