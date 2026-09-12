@@ -150,7 +150,8 @@ def make_two_tower_detector_adapter(config, config2, checkpoint, tower_name,
 
 
 def make_two_tower_detector_from_config(config_path, config2_path, checkpoint=None, tower_name="LogitsAvg",
-                                        weights_mode="required", device=None, actions=None):
+                                        weights_mode="required", device=None, actions=None,
+                                        action_batch_size=1):
     """CLI-friendly eval2tower factory using the evaluator's two YAML configs."""
     if actions is not None:
         return make_action_two_tower_detector_from_config(
@@ -160,6 +161,7 @@ def make_two_tower_detector_from_config(config_path, config2_path, checkpoint=No
             tower_name=tower_name,
             weights_mode=weights_mode,
             device=device,
+            action_batch_size=action_batch_size,
         )
     from libs.core import load_config
 
@@ -172,6 +174,7 @@ def make_two_tower_detector_from_config(config_path, config2_path, checkpoint=No
 def make_action_two_tower_detector_adapter(actions, predictor_builder=None,
                                            feat_stride=3, num_frames=8,
                                            heatmap_dim=576, segment_duration=4.004,
+                                           action_batch_size=1,
                                            heatmap_size=None):
     """Build a fine detector from the seven action-specific stage-2 models."""
     if not isinstance(actions, (list, tuple)) or len(actions) != 7:
@@ -184,6 +187,7 @@ def make_action_two_tower_detector_adapter(actions, predictor_builder=None,
     adapter = FineDetectorAdapter(
         predictor=_ActionTwoTowerEnsemble(
             action_specs, predictor_builder or _default_action_predictor_builder,
+            batch_size=action_batch_size,
         ),
         feat_stride=feat_stride,
         num_frames=num_frames,
@@ -196,7 +200,8 @@ def make_action_two_tower_detector_adapter(actions, predictor_builder=None,
 
 def make_action_two_tower_detector_from_config(config_path, config2_path, actions,
                                                tower_name="LogitsAvg",
-                                               weights_mode="required", device=None):
+                                               weights_mode="required", device=None,
+                                               action_batch_size=1):
     """CLI-friendly seven-model fine detector mirroring eval2stage action ckpts."""
     from libs.core import load_config
 
@@ -217,6 +222,7 @@ def make_action_two_tower_detector_from_config(config_path, config2_path, action
         num_frames=config["dataset"].get("num_frames", 8),
         heatmap_dim=config2["dataset"].get("input_dim", 576),
         segment_duration=config.get("seg_duration", 4.004),
+        action_batch_size=action_batch_size,
         heatmap_size=_heatmap_size_from_config(config2),
     )
 
@@ -229,9 +235,10 @@ def _make_evaluator_model(config, checkpoint, weights_mode, device):
 
 
 class _ActionTwoTowerEnsemble:
-    def __init__(self, actions, predictor_builder):
+    def __init__(self, actions, predictor_builder, batch_size=1):
         self.actions = actions
         self.predictor_builder = predictor_builder
+        self.batch_size = _positive_int(batch_size, "action_batch_size")
         self.weights_loaded = None
         self.checkpoint_warnings = []
 
@@ -242,12 +249,14 @@ class _ActionTwoTowerEnsemble:
         for action in self.actions:
             predictor = self.predictor_builder(action["name"], action["checkpoint"])
             try:
-                action_results = predictor(batch, context)
-                if isinstance(action_results, dict):
-                    action_results = [action_results]
-                if not isinstance(action_results, list):
-                    raise StructuralRunError("Action model {} returned non-list results".format(action["name"]))
-                results.extend(action_results)
+                for chunk in _chunks(batch, self.batch_size):
+                    action_results = predictor(chunk, context)
+                    if isinstance(action_results, dict):
+                        action_results = [action_results]
+                    if not isinstance(action_results, list):
+                        raise StructuralRunError("Action model {} returned non-list results".format(action["name"]))
+                    results.extend(action_results)
+                    _release_cuda_cache()
                 action_loaded = getattr(predictor, "weights_loaded", None)
                 if action_loaded is not None:
                     loaded.append(bool(action_loaded))
@@ -288,10 +297,32 @@ def _release_predictor(predictor):
     try:
         import torch
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.ipc_collect()
+            _release_cuda_cache()
     except (ImportError, RuntimeError):
         return None
+
+
+def _release_cuda_cache():
+    import torch
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+
+
+def _chunks(values, size):
+    for start in range(0, len(values), size):
+        yield values[start:start + size]
+
+
+def _positive_int(value, name):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as error:
+        raise StructuralRunError("{} must be a positive integer".format(name)) from error
+    if parsed < 1:
+        raise StructuralRunError("{} must be a positive integer".format(name))
+    return parsed
 
 
 def _prepare_model(model, checkpoint, weights_mode, device, devices=None):

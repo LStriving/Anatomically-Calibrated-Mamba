@@ -45,6 +45,9 @@ stages:
       config2_path: configs/sg-mamba-stage2-heatmap.yaml
       tower_name: LogitsAvg
       weights_mode: required
+      # Keep this at 1 on a single 24GB GPU: each action model is loaded alone,
+      # and clips are forwarded one at a time to avoid Mamba activation OOM.
+      action_batch_size: 1
       actions:
         - name: OralDelivery
           checkpoint: ckpts/stage2_actions/OralDelivery/epoch_best.pth.tar

@@ -303,6 +303,50 @@ def test_action_two_tower_ensemble_releases_each_action_before_loading_next():
     assert closed == [str(index) for index in range(7)]
 
 
+def test_action_two_tower_ensemble_chunks_segments_within_each_action():
+    """Large coarse segment sets must not be forwarded as one huge Mamba batch."""
+    from experiments.latency.adapters.detectors import make_action_two_tower_detector_adapter
+
+    batch_sizes = []
+
+    class Predictor:
+        def __init__(self, action_name):
+            self.action_name = action_name
+
+        def __call__(self, batch, _):
+            batch_sizes.append(len(batch))
+            return [{
+                "video_id": item[0]["video_id"],
+                "segments": np.asarray([[0.1, 0.2]], dtype=np.float32),
+                "scores": np.asarray([0.9], dtype=np.float32),
+                "labels": np.asarray([1], dtype=np.int64),
+            } for item in batch]
+
+        def close(self):
+            return None
+
+    adapter = make_action_two_tower_detector_adapter(
+        actions=[{"name": str(index), "checkpoint": str(index)} for index in range(7)],
+        predictor_builder=lambda action_name, _checkpoint: Predictor(action_name),
+        action_batch_size=2,
+    )
+    fine_input = [
+        ({"video_id": "video#{}".format(index), "feats": np.zeros((2, 4), dtype=np.float32),
+          "feat_stride": 3, "feat_num_frames": 8},
+         {"video_id": "video#{}".format(index), "feats": np.zeros((1, 2, 4, 4), dtype=np.float32),
+          "feat_stride": 3, "feat_num_frames": 8})
+        for index in range(5)
+    ]
+    payload = Payload({
+        "video": {"id": "video", "path": "video.avi", "duration": 2.0, "fps": 30},
+        "fine_input": fine_input,
+    })
+
+    adapter.run(payload, {})
+
+    assert batch_sizes == [2, 2, 1] * 7
+
+
 def test_legacy_two_tower_factory_delegates_actions_to_action_ensemble(monkeypatch):
     """Older configs may keep the single-model factory path while adding action checkpoints."""
     from experiments.latency.adapters import detectors
@@ -323,6 +367,7 @@ def test_legacy_two_tower_factory_delegates_actions_to_action_ensemble(monkeypat
         tower_name="LogitsAvg",
         weights_mode="skip",
         actions=actions,
+        action_batch_size=3,
     )
 
     assert result == "adapter"
@@ -331,6 +376,7 @@ def test_legacy_two_tower_factory_delegates_actions_to_action_ensemble(monkeypat
     assert seen["config2_path"] == "heatmap.yaml"
     assert seen["tower_name"] == "LogitsAvg"
     assert seen["weights_mode"] == "skip"
+    assert seen["action_batch_size"] == 3
 
 
 def test_detector_factory_forwards_under_inference_mode(monkeypatch):
