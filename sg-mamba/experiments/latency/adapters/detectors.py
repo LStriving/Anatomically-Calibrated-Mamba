@@ -111,7 +111,7 @@ def make_coarse_detector_adapter(config, checkpoint, weights_mode="required", de
     """Build the stage-1 evaluator model before the runner starts timing videos."""
     model = _make_evaluator_model(config, checkpoint, weights_mode, device)
     adapter = CoarseDetectorAdapter(
-        predictor=lambda value, _: model(value),
+        predictor=lambda value, _: _call_model_inference(model, value),
         feat_stride=config["dataset"].get("feat_stride", 3),
         num_frames=config["dataset"].get("num_frames", 8),
     )
@@ -138,7 +138,7 @@ def make_two_tower_detector_adapter(config, config2, checkpoint, tower_name,
     model = make_two_tower(tower_name, visual, heatmap, config, config2, **config["two_tower"])
     model = _prepare_model(model, checkpoint, weights_mode, device, config.get("devices"))
     adapter = FineDetectorAdapter(
-        predictor=lambda value, _: model(value),
+        predictor=lambda value, _: _call_model_inference(model, value),
         feat_stride=config["dataset"].get("feat_stride", 3),
         num_frames=config["dataset"].get("num_frames", 8),
         heatmap_dim=config2["dataset"].get("input_dim", 576),
@@ -323,6 +323,13 @@ def _prepare_model(model, checkpoint, weights_mode, device, devices=None):
         model.checkpoint_warnings.append(message)
         warnings.warn(message, RuntimeWarning)
     return model
+
+
+def _call_model_inference(model, value):
+    import torch
+
+    with torch.inference_mode():
+        return model(value)
 
 
 def _copy_weight_status(adapter, model):

@@ -1,6 +1,8 @@
 """Contract tests for raw-video latency pipeline adapters."""
 import numpy as np
+import sys
 import torch
+import types
 import pytest
 
 from experiments.latency.contracts import Payload, StructuralRunError
@@ -329,6 +331,38 @@ def test_legacy_two_tower_factory_delegates_actions_to_action_ensemble(monkeypat
     assert seen["config2_path"] == "heatmap.yaml"
     assert seen["tower_name"] == "LogitsAvg"
     assert seen["weights_mode"] == "skip"
+
+
+def test_detector_factory_forwards_under_inference_mode(monkeypatch):
+    """Evaluator models must not build autograd graphs during latency inference."""
+    from experiments.latency.adapters import detectors
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.grad_enabled_during_forward = None
+
+        def forward(self, value):
+            self.grad_enabled_during_forward = torch.is_grad_enabled()
+            return [{"segments": torch.tensor([[0.0, 1.0]]), "scores": torch.tensor([0.9]),
+                     "labels": torch.tensor([0]), "video_id": "video"}]
+
+    model = Model()
+
+    fake_modeling = types.ModuleType("libs.modeling")
+    fake_modeling.make_meta_arch = lambda *_args, **_kwargs: model
+    monkeypatch.setitem(sys.modules, "libs.modeling", fake_modeling)
+
+    adapter = detectors.make_coarse_detector_adapter(
+        {"model_name": "dummy", "model": {}, "dataset": {}},
+        checkpoint=None,
+        weights_mode="skip",
+        device="cpu",
+    )
+    adapter.predictor([{"video_id": "video", "feats": torch.zeros(4, 2),
+                        "feat_stride": 3, "feat_num_frames": 8}], {})
+
+    assert model.grad_enabled_during_forward is False
 
 
 def test_reference_skeleton_adapter_preserves_heatmap_branch_geometry():
