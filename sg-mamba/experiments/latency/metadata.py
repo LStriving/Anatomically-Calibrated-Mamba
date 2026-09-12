@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import platform
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,10 +30,8 @@ def write_meta_report(output_dir: Union[str, Path], metadata: Mapping[str, Any])
     destination.mkdir(parents=True, exist_ok=True)
     report = dict(metadata)
     report.setdefault("timestamp_utc", datetime.now(timezone.utc).isoformat())
-    report.setdefault("environment", {
-        "python": sys.version,
-        "platform": platform.platform(),
-    })
+    report.setdefault("environment", _environment())
+    report.setdefault("repository", _repository_metadata())
     indexed = []
     for item in report.get("artifacts", []):
         entry = dict(item)
@@ -49,3 +48,32 @@ def write_meta_report(output_dir: Union[str, Path], metadata: Mapping[str, Any])
         suffix += 1
     report_path.write_text(json.dumps(report, indent=2, default=_json_value), encoding="utf-8")
     return report_path
+
+
+def _environment():
+    environment = {
+        "python": sys.version,
+        "platform": platform.platform(),
+        "cpu": platform.processor(),
+    }
+    try:
+        import torch
+        environment.update({
+            "torch": torch.__version__,
+            "cuda": torch.version.cuda,
+            "cuda_available": bool(torch.cuda.is_available()),
+            "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        })
+    except (ImportError, RuntimeError):
+        environment["torch"] = None
+    return environment
+
+
+def _repository_metadata():
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True
+        ).strip()
+        return {"commit": commit}
+    except (OSError, subprocess.CalledProcessError):
+        return {"commit": None}

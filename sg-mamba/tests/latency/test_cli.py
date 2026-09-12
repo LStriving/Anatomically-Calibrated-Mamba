@@ -67,3 +67,28 @@ def test_cli_writes_metadata_when_factory_construction_is_structural_failure(tmp
         main(["--manifest", str(manifest), "--config", str(config), "--output-dir", str(tmp_path / "out")])
     reports = list((tmp_path / "out").glob("meta_report_*.json"))
     assert len(reports) == 1
+
+
+def test_cli_records_input_hashes_and_command_metadata(tmp_path):
+    from experiments.latency.cli import main
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"id": "v", "path": "video.avi"}]), encoding="utf-8")
+    config = tmp_path / "latency.yaml"
+    config.write_text(
+        "mode: validate\nstages:\n  - name: missing\n"
+        "    factory: missing.module:factory\n    kwargs: {}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(StructuralRunError):
+        main([
+            "--manifest", str(manifest), "--config", str(config),
+            "--mode", "validate", "--output-dir", str(tmp_path / "out"),
+        ])
+    report_path = next((tmp_path / "out").glob("meta_report_*.json"))
+    report = json.loads(Path(report_path).read_text(encoding="utf-8"))
+    metadata = report["args"]["_experiment_metadata"]
+    assert len(metadata["config_sha256"]) == 64
+    assert len(metadata["manifest_sha256"]) == 64
+    assert metadata["config_path"].endswith("latency.yaml")

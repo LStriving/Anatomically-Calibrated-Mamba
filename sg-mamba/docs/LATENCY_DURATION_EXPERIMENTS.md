@@ -23,7 +23,7 @@
   - `predictions_<timestamp>.json`
   - `meta_report_<timestamp>.json`
 - duration-error 模块可读取 `eval2tower.py` 生成的 `final_result.pkl`，执行 schema 校验、独立 tIoU matching 和报告生成。
-- 当前自动化测试：`26 passed`。
+- 当前自动化测试：`29 passed`（包含 metadata、CLI 和完整 synthetic pipeline 测试）。
 
 ### 尚未完成
 

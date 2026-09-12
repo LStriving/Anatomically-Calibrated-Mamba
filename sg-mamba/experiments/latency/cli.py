@@ -2,6 +2,7 @@
 import argparse
 import importlib
 import json
+import sys
 from pathlib import Path
 
 import yaml
@@ -9,7 +10,7 @@ import yaml
 from .adapters.flow import FlowExtractAdapter
 from .adapters.video import VideoDecodeAdapter
 from .contracts import StructuralRunError
-from .metadata import write_meta_report
+from .metadata import sha256_file, write_meta_report
 from .runner import run_benchmark
 
 
@@ -93,6 +94,13 @@ def main(argv=None):
         config["mode"] = args.mode
     if args.weights_mode is not None:
         config["weights_mode"] = args.weights_mode
+    config["_experiment_metadata"] = {
+        "config_path": str(Path(args.config).resolve()),
+        "config_sha256": sha256_file(Path(args.config)),
+        "manifest_path": str(Path(args.manifest).resolve()),
+        "manifest_sha256": sha256_file(Path(args.manifest)),
+        "command": [sys.executable, "-m", "experiments.latency.cli"] + list(argv or sys.argv[1:]),
+    }
     try:
         manifest = load_manifest(args.manifest)
         adapters = build_adapters(config)
