@@ -93,3 +93,26 @@ def test_runner_records_adapter_weight_status_and_warnings(tmp_path):
         "name": "decode", "weights_loaded": False,
         "checkpoint_warnings": ["using audited test fallback"],
     }]
+
+
+class CountingDecode:
+    name = "decode"
+    calls = 0
+
+    def prepare(self, context): pass
+    def close(self): pass
+    def run(self, payload, context):
+        type(self).calls += 1
+        return payload.with_value("frames", [context["video"]["id"]])
+
+
+def test_runner_reuses_stage_outputs_from_cache(tmp_path):
+    """Leaving cache_key disconnected from runner lifecycle would execute decode twice."""
+    CountingDecode.calls = 0
+    config = {"mode": "validate", "cache": {"enabled": True, "dir": str(tmp_path / "cache")}}
+    manifest = [{"id": "v", "path": "v.avi"}]
+
+    run_benchmark(config, manifest, [CountingDecode()], tmp_path / "first")
+    run_benchmark(config, manifest, [CountingDecode()], tmp_path / "second")
+
+    assert CountingDecode.calls == 1

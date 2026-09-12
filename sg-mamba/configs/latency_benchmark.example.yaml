@@ -39,13 +39,27 @@ stages:
       sigma: 4
       crop_mode: auto
   - name: fine_detector
-    factory: experiments.latency.adapters.detectors:make_two_tower_detector_from_config
+    factory: experiments.latency.adapters.detectors:make_action_two_tower_detector_from_config
     kwargs:
       config_path: configs/sg-mamba-stage2.yaml
       config2_path: configs/sg-mamba-stage2-heatmap.yaml
-      checkpoint: ckpts/ckpt_swallow/mamba_swallow_i3d_stage1_mamba_swallow_stage1_2_0.0001/epoch_024_0.82621.pth.tar
       tower_name: LogitsAvg
       weights_mode: required
+      actions:
+        - name: OralDelivery
+          checkpoint: ckpts/stage2_actions/OralDelivery/epoch_best.pth.tar
+        - name: SoftPalateLift
+          checkpoint: ckpts/stage2_actions/SoftPalateLift/epoch_best.pth.tar
+        - name: HyoidExercise
+          checkpoint: ckpts/stage2_actions/HyoidExercise/epoch_best.pth.tar
+        - name: UESOpen
+          checkpoint: ckpts/stage2_actions/UESOpen/epoch_best.pth.tar
+        - name: ThroatSwallow
+          checkpoint: ckpts/stage2_actions/ThroatSwallow/epoch_best.pth.tar
+        - name: ThroatTransport
+          checkpoint: ckpts/stage2_actions/ThroatTransport/epoch_best.pth.tar
+        - name: LaryngealVestibuleClosure
+          checkpoint: ckpts/stage2_actions/LaryngealVestibuleClosure/epoch_best.pth.tar
   - name: postprocess
     factory: experiments.latency.adapters.detectors:PostprocessAdapter
     kwargs:

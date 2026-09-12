@@ -151,11 +151,92 @@ def make_two_tower_detector_from_config(config_path, config2_path, checkpoint, t
     )
 
 
+def make_action_two_tower_detector_adapter(actions, predictor_builder=None,
+                                           feat_stride=3, num_frames=8,
+                                           heatmap_dim=576, segment_duration=4.004):
+    """Build a fine detector from the seven action-specific stage-2 models."""
+    if not isinstance(actions, (list, tuple)) or len(actions) != 7:
+        raise StructuralRunError("Action two-tower fine detector requires exactly 7 action models")
+    predictors = []
+    warnings_by_action = []
+    weights_loaded = []
+    for action in actions:
+        if not isinstance(action, dict) or "name" not in action or "checkpoint" not in action:
+            raise StructuralRunError("Each action model requires name and checkpoint")
+        builder = predictor_builder or _default_action_predictor_builder(action)
+        predictor = builder(action["name"], action["checkpoint"])
+        predictors.append({"name": action["name"], "predictor": predictor})
+        warnings_by_action.extend(getattr(predictor, "checkpoint_warnings", []))
+        loaded = getattr(predictor, "weights_loaded", None)
+        if loaded is not None:
+            weights_loaded.append(bool(loaded))
+    adapter = FineDetectorAdapter(
+        predictor=_ActionTwoTowerEnsemble(predictors),
+        feat_stride=feat_stride,
+        num_frames=num_frames,
+        heatmap_dim=heatmap_dim,
+        segment_duration=segment_duration,
+    )
+    adapter.weights_loaded = all(weights_loaded) if weights_loaded else None
+    adapter.checkpoint_warnings = warnings_by_action
+    return adapter
+
+
+def make_action_two_tower_detector_from_config(config_path, config2_path, actions,
+                                               tower_name="LogitsAvg",
+                                               weights_mode="required", device=None):
+    """CLI-friendly seven-model fine detector mirroring eval2stage action ckpts."""
+    from libs.core import load_config
+
+    config = load_config(config_path)
+    config2 = load_config(config2_path)
+
+    def builder(_action_name, checkpoint):
+        model = make_two_tower_detector_adapter(
+            config, config2, checkpoint, tower_name,
+            weights_mode=weights_mode, device=device,
+        )
+        return model.predictor
+
+    return make_action_two_tower_detector_adapter(
+        actions=actions,
+        predictor_builder=builder,
+        feat_stride=config["dataset"].get("feat_stride", 3),
+        num_frames=config["dataset"].get("num_frames", 8),
+        heatmap_dim=config2["dataset"].get("input_dim", 576),
+        segment_duration=config.get("seg_duration", 4.004),
+    )
+
+
 def _make_evaluator_model(config, checkpoint, weights_mode, device):
     from libs.modeling import make_meta_arch
 
     model = make_meta_arch(config["model_name"], **config["model"])
     return _prepare_model(model, checkpoint, weights_mode, device, config.get("devices"))
+
+
+class _ActionTwoTowerEnsemble:
+    def __init__(self, predictors):
+        self.predictors = predictors
+
+    def __call__(self, batch, context):
+        results = []
+        for item in self.predictors:
+            action_results = item["predictor"](batch, context)
+            if isinstance(action_results, dict):
+                action_results = [action_results]
+            if not isinstance(action_results, list):
+                raise StructuralRunError("Action model {} returned non-list results".format(item["name"]))
+            results.extend(action_results)
+        return results
+
+
+def _default_action_predictor_builder(action):
+    raise StructuralRunError(
+        "Action model {} requires make_action_two_tower_detector_from_config or predictor_builder".format(
+            action.get("name")
+        )
+    )
 
 
 def _prepare_model(model, checkpoint, weights_mode, device, devices=None):

@@ -1,11 +1,14 @@
 """Stage-ordered, failure-isolated latency execution."""
 import csv
+import hashlib
 import json
+import pickle
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter_ns
 from statistics import mean
 
+from .cache import StageCache, cache_key
 from .contracts import Payload, RecoverableVideoError, StructuralRunError
 from .metadata import write_meta_report
 
@@ -20,6 +23,7 @@ def run_benchmark(config, manifest, adapters, output_dir):
     if names != [name for name in STAGE_ORDER if name in names]:
         raise StructuralRunError("Adapters must be supplied in pipeline order")
     successes, failures, rows, predictions = [], [], [], []
+    cache = _stage_cache(config)
     preparation_started = perf_counter_ns()
     preparation = []
     try:
@@ -32,12 +36,22 @@ def run_benchmark(config, manifest, adapters, output_dir):
             try:
                 _reset_peak_gpu_memory()
                 for adapter in adapters:
-                    stage = adapter.name; _cuda_synchronize(); start = perf_counter_ns()
+                    stage = adapter.name
+                    key = _stage_cache_key(config, video, adapter, payload)
+                    cached_payload = cache.load(key) if cache is not None else None
+                    if cached_payload is not None:
+                        payload = cached_payload
+                        timings[stage + "_ms"] = 0.0
+                        timings[stage + "_cache_hit"] = True
+                        continue
+                    _cuda_synchronize(); start = perf_counter_ns()
                     payload = adapter.run(payload, {"config": config, "video": video})
                     _cuda_synchronize()
                     timings[stage + "_ms"] = (perf_counter_ns() - start) / 1_000_000
+                    if cache is not None:
+                        cache.save(key, payload)
                 peak_gpu_memory = _peak_gpu_memory()
-                total_ms = sum(timings.values())
+                total_ms = sum(value for key, value in timings.items() if key.endswith("_ms"))
                 successes.append({"video_id": video["id"], "stage_timings_ms": timings,
                                   "peak_gpu_memory_bytes": peak_gpu_memory})
                 rows.append({"video_id": video["id"], "input_path": video["path"],
@@ -118,6 +132,34 @@ def _json_safe(value):
     if hasattr(value, "item"):
         return value.item()
     return value
+
+
+def _stage_cache(config):
+    cache_config = config.get("cache")
+    if not cache_config:
+        return None
+    if isinstance(cache_config, str):
+        return StageCache(cache_config)
+    if not isinstance(cache_config, dict) or not cache_config.get("enabled", False):
+        return None
+    cache_dir = cache_config.get("dir") or cache_config.get("path")
+    if not cache_dir:
+        raise StructuralRunError("Enabled latency cache requires cache.dir")
+    return StageCache(cache_dir)
+
+
+def _stage_cache_key(config, video, adapter, payload):
+    cache_config = config.get("cache") if isinstance(config.get("cache"), dict) else {}
+    visible_config = dict(config)
+    visible_config.pop("cache", None)
+    return cache_key(
+        "latency-stage-v1",
+        cache_config.get("version", 1),
+        getattr(adapter, "name", type(adapter).__name__),
+        {"video_id": video.get("id"), "path": video.get("path")},
+        visible_config,
+        hashlib.sha256(pickle.dumps(payload.values)).hexdigest(),
+    )
 
 
 def _aggregate_successes(successes, mode):
