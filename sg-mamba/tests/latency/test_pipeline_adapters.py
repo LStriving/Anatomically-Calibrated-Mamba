@@ -146,6 +146,52 @@ def test_fine_detector_normalizes_model_results_for_postprocess():
     assert result["label"] == [3]
 
 
+def test_action_two_tower_ensemble_builds_one_model_per_action_and_merges_results():
+    """Using one stage-2 checkpoint for all classes would miss eval2stage's per-action model contract."""
+    from experiments.latency.adapters.detectors import make_action_two_tower_detector_adapter
+
+    built = []
+
+    def builder(action_name, checkpoint):
+        built.append((action_name, checkpoint))
+
+        def predictor(batch, _):
+            return [{
+                "video_id": batch[0][0]["video_id"],
+                "segments": np.asarray([[0.1, 0.2]], dtype=np.float32),
+                "scores": np.asarray([0.9], dtype=np.float32),
+                "labels": np.asarray([len(built)], dtype=np.int64),
+            }]
+
+        return predictor
+
+    adapter = make_action_two_tower_detector_adapter(
+        actions=[
+            {"name": "oral", "checkpoint": "oral.pth.tar"},
+            {"name": "soft_palate", "checkpoint": "soft.pth.tar"},
+            {"name": "hyoid", "checkpoint": "hyoid.pth.tar"},
+            {"name": "larynx", "checkpoint": "larynx.pth.tar"},
+            {"name": "epiglottis", "checkpoint": "epi.pth.tar"},
+            {"name": "ues", "checkpoint": "ues.pth.tar"},
+            {"name": "bolus", "checkpoint": "bolus.pth.tar"},
+        ],
+        predictor_builder=builder,
+    )
+    payload = Payload({
+        "video": {"id": "video", "path": "video.avi", "duration": 2.0, "fps": 30},
+        "fine_input": [({"video_id": "video#0", "feats": np.zeros((2, 4), dtype=np.float32),
+                         "feat_stride": 3, "feat_num_frames": 8},
+                        {"video_id": "video#0", "feats": np.zeros((2, 4), dtype=np.float32),
+                         "feat_stride": 3, "feat_num_frames": 8})],
+    })
+
+    result = adapter.run(payload, {}).require("fine_predictions")
+
+    assert len(built) == 7
+    assert built[0] == ("oral", "oral.pth.tar")
+    assert len(result["label"]) == 7
+
+
 def test_reference_skeleton_adapter_preserves_heatmap_branch_geometry():
     """Replacing the reference heatmap encoding would feed a different stage-2 representation."""
     from experiments.latency.adapters.keypoints import make_skeleton_adapter
