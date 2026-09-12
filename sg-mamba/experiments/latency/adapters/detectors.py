@@ -28,6 +28,8 @@ class CoarseDetectorAdapter:
         coarse_input = payload.values.get("coarse_input")
         if coarse_input is None:
             coarse_input = _build_visual_input(payload, self.feat_stride, self.num_frames)
+        else:
+            coarse_input = _normalize_single_tower_input(coarse_input)
         _validate_single_tower_input(coarse_input, "coarse_input")
         coarse_segments = self.predictor(coarse_input, context)
         return (payload.with_value("coarse_input", coarse_input)
@@ -62,6 +64,8 @@ class FineDetectorAdapter:
                 payload, self.feat_stride, self.num_frames, self.heatmap_dim,
                 self.segment_duration,
             )
+        else:
+            fine_input = _normalize_two_tower_input(fine_input)
         _validate_two_tower_input(fine_input)
         raw_predictions = self.predictor(fine_input, context)
         return payload.with_value("fine_input", fine_input).with_value(
@@ -290,6 +294,17 @@ def _validate_single_tower_input(value, name):
     _validate_evaluator_item(value[0], name + "[0]")
 
 
+def _normalize_single_tower_input(value):
+    return [_normalize_evaluator_item(item) for item in value]
+
+
+def _normalize_two_tower_input(value):
+    return [
+        (_normalize_evaluator_item(pair[0]), _normalize_evaluator_item(pair[1]))
+        for pair in value
+    ]
+
+
 def _validate_two_tower_input(value):
     if not isinstance(value, list) or not value:
         raise StructuralRunError("fine_input must be a non-empty MultiModalDataset batch")
@@ -320,7 +335,7 @@ def _build_two_tower_input(payload, feat_stride, num_frames, heatmap_dim, segmen
     }
     pairs = []
     for segment_id, center in centers.items():
-        visual_clip = _clip_features(visual["feats"].T, center, payload, feat_stride, segment_duration)
+        visual_clip = _clip_features(_features_to_numpy(visual["feats"]).T, center, payload, feat_stride, segment_duration)
         heatmap_clip = _clip_features(heatmap, center, payload, feat_stride, segment_duration)
         pairs.append((
             _evaluator_item(payload, visual_clip, feat_stride, num_frames, video_id=segment_id,
@@ -340,7 +355,7 @@ def _evaluator_item(payload, time_features, feat_stride, num_frames, video_id=No
     ))
     return {
         "video_id": video_id or video["id"],
-        "feats": features.T.copy(),
+        "feats": _as_feature_tensor(features.T.copy()),
         "segments": None,
         "labels": None,
         "fps": fps,
@@ -443,3 +458,29 @@ def _validate_evaluator_item(value, name):
     missing = required.difference(value)
     if missing:
         raise StructuralRunError("{} is missing fields: {}".format(name, ", ".join(sorted(missing))))
+    try:
+        import torch
+    except ImportError as error:
+        raise StructuralRunError("PyTorch is required for evaluator feature tensors") from error
+    if not isinstance(value["feats"], torch.Tensor):
+        raise StructuralRunError("{} feats must be a torch.Tensor".format(name))
+
+
+def _normalize_evaluator_item(value):
+    normalized = dict(value)
+    normalized["feats"] = _as_feature_tensor(normalized["feats"])
+    return normalized
+
+
+def _as_feature_tensor(value):
+    import torch
+
+    if isinstance(value, torch.Tensor):
+        return value.float().contiguous()
+    return torch.from_numpy(np.ascontiguousarray(np.asarray(value, dtype=np.float32)))
+
+
+def _features_to_numpy(value):
+    if hasattr(value, "detach"):
+        return value.detach().cpu().numpy()
+    return np.asarray(value, dtype=np.float32)

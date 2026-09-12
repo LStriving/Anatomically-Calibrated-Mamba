@@ -120,10 +120,43 @@ def test_detectors_build_real_evaluator_inputs_from_feature_payload():
     payload = CoarseDetectorAdapter(coarse_predictor, feat_stride=3, num_frames=8).run(payload, {})
     payload = FineDetectorAdapter(fine_predictor, feat_stride=3, num_frames=8, heatmap_dim=4).run(payload, {})
 
+    assert isinstance(seen["coarse"][0]["feats"], torch.Tensor)
+    assert isinstance(seen["fine"][0][0]["feats"], torch.Tensor)
+    assert isinstance(seen["fine"][0][1]["feats"], torch.Tensor)
     assert seen["coarse"][0]["feats"].shape == (4, 4)
     assert seen["fine"][0][0]["feats"].shape[0] == 4
     assert seen["fine"][0][1]["feats"].shape[0] == 4
     assert seen["fine"][0][0]["video_id"] == "video#0"
+
+
+def test_detectors_normalize_injected_evaluator_inputs_to_tensors():
+    """The evaluator calls torch padding on feats, so injected inputs cannot remain numpy arrays."""
+    from experiments.latency.adapters.detectors import CoarseDetectorAdapter, FineDetectorAdapter
+
+    coarse_seen = {}
+    fine_seen = {}
+    item = {"video_id": "video#0", "feats": np.zeros((2, 4), dtype=np.float32),
+            "feat_stride": 3, "feat_num_frames": 8}
+    payload = Payload({
+        "video": {"id": "video", "path": "video.avi", "duration": 2.0},
+        "coarse_input": [dict(item)],
+        "fine_input": [(dict(item), dict(item))],
+    })
+
+    def coarse_predictor(batch, _):
+        coarse_seen["batch"] = batch
+        return []
+
+    def fine_predictor(batch, _):
+        fine_seen["batch"] = batch
+        return []
+
+    payload = CoarseDetectorAdapter(predictor=coarse_predictor).run(payload, {})
+    FineDetectorAdapter(predictor=fine_predictor).run(payload, {})
+
+    assert isinstance(coarse_seen["batch"][0]["feats"], torch.Tensor)
+    assert isinstance(fine_seen["batch"][0][0]["feats"], torch.Tensor)
+    assert isinstance(fine_seen["batch"][0][1]["feats"], torch.Tensor)
 
 
 def test_fine_detector_normalizes_model_results_for_postprocess():
