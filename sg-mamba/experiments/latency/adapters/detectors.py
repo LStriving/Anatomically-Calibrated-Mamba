@@ -1,5 +1,6 @@
 """Detector boundaries and evaluator-compatible prediction post-processing."""
 from copy import deepcopy
+import gc
 from pathlib import Path
 import warnings
 import numpy as np
@@ -69,6 +70,8 @@ class FineDetectorAdapter:
             fine_input = _normalize_two_tower_input(fine_input)
         _validate_two_tower_input(fine_input)
         raw_predictions = self.predictor(fine_input, context)
+        self.weights_loaded = getattr(self.predictor, "weights_loaded", self.weights_loaded)
+        self.checkpoint_warnings = list(getattr(self.predictor, "checkpoint_warnings", self.checkpoint_warnings))
         return payload.with_value("fine_input", fine_input).with_value(
             "fine_predictions", _prediction_columns(raw_predictions, fine_input, payload)
         )
@@ -173,29 +176,21 @@ def make_action_two_tower_detector_adapter(actions, predictor_builder=None,
     """Build a fine detector from the seven action-specific stage-2 models."""
     if not isinstance(actions, (list, tuple)) or len(actions) != 7:
         raise StructuralRunError("Action two-tower fine detector requires exactly 7 action models")
-    predictors = []
-    warnings_by_action = []
-    weights_loaded = []
+    action_specs = []
     for action in actions:
         if not isinstance(action, dict) or "name" not in action or "checkpoint" not in action:
             raise StructuralRunError("Each action model requires name and checkpoint")
-        builder = predictor_builder or _default_action_predictor_builder(action)
-        predictor = builder(action["name"], action["checkpoint"])
-        predictors.append({"name": action["name"], "predictor": predictor})
-        warnings_by_action.extend(getattr(predictor, "checkpoint_warnings", []))
-        loaded = getattr(predictor, "weights_loaded", None)
-        if loaded is not None:
-            weights_loaded.append(bool(loaded))
+        action_specs.append(dict(action))
     adapter = FineDetectorAdapter(
-        predictor=_ActionTwoTowerEnsemble(predictors),
+        predictor=_ActionTwoTowerEnsemble(
+            action_specs, predictor_builder or _default_action_predictor_builder,
+        ),
         feat_stride=feat_stride,
         num_frames=num_frames,
         heatmap_dim=heatmap_dim,
         segment_duration=segment_duration,
         heatmap_size=heatmap_size,
     )
-    adapter.weights_loaded = all(weights_loaded) if weights_loaded else None
-    adapter.checkpoint_warnings = warnings_by_action
     return adapter
 
 
@@ -209,11 +204,11 @@ def make_action_two_tower_detector_from_config(config_path, config2_path, action
     config2 = load_config(config2_path)
 
     def builder(_action_name, checkpoint):
-        model = make_two_tower_detector_adapter(
+        adapter = make_two_tower_detector_adapter(
             config, config2, checkpoint, tower_name,
             weights_mode=weights_mode, device=device,
         )
-        return model.predictor
+        return _SingleActionPredictor(adapter)
 
     return make_action_two_tower_detector_adapter(
         actions=actions,
@@ -234,27 +229,69 @@ def _make_evaluator_model(config, checkpoint, weights_mode, device):
 
 
 class _ActionTwoTowerEnsemble:
-    def __init__(self, predictors):
-        self.predictors = predictors
+    def __init__(self, actions, predictor_builder):
+        self.actions = actions
+        self.predictor_builder = predictor_builder
+        self.weights_loaded = None
+        self.checkpoint_warnings = []
 
     def __call__(self, batch, context):
         results = []
-        for item in self.predictors:
-            action_results = item["predictor"](batch, context)
-            if isinstance(action_results, dict):
-                action_results = [action_results]
-            if not isinstance(action_results, list):
-                raise StructuralRunError("Action model {} returned non-list results".format(item["name"]))
-            results.extend(action_results)
+        loaded = []
+        warnings_seen = []
+        for action in self.actions:
+            predictor = self.predictor_builder(action["name"], action["checkpoint"])
+            try:
+                action_results = predictor(batch, context)
+                if isinstance(action_results, dict):
+                    action_results = [action_results]
+                if not isinstance(action_results, list):
+                    raise StructuralRunError("Action model {} returned non-list results".format(action["name"]))
+                results.extend(action_results)
+                action_loaded = getattr(predictor, "weights_loaded", None)
+                if action_loaded is not None:
+                    loaded.append(bool(action_loaded))
+                warnings_seen.extend(getattr(predictor, "checkpoint_warnings", []))
+            finally:
+                _release_predictor(predictor)
+        self.weights_loaded = all(loaded) if loaded else None
+        self.checkpoint_warnings = warnings_seen
         return results
 
 
-def _default_action_predictor_builder(action):
+class _SingleActionPredictor:
+    def __init__(self, adapter):
+        self.adapter = adapter
+        self.weights_loaded = getattr(adapter, "weights_loaded", None)
+        self.checkpoint_warnings = list(getattr(adapter, "checkpoint_warnings", []))
+
+    def __call__(self, batch, context):
+        return self.adapter.predictor(batch, context)
+
+    def close(self):
+        self.adapter.predictor = None
+        self.adapter = None
+
+
+def _default_action_predictor_builder(action_name, checkpoint):
     raise StructuralRunError(
-        "Action model {} requires make_action_two_tower_detector_from_config or predictor_builder".format(
-            action.get("name")
-        )
+        "Action model {} requires make_action_two_tower_detector_from_config or predictor_builder".format(action_name)
     )
+
+
+def _release_predictor(predictor):
+    close = getattr(predictor, "close", None)
+    if callable(close):
+        close()
+    del predictor
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except (ImportError, RuntimeError):
+        return None
 
 
 def _prepare_model(model, checkpoint, weights_mode, device, devices=None):

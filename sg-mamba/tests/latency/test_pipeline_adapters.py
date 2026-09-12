@@ -238,6 +238,7 @@ def test_action_two_tower_ensemble_builds_one_model_per_action_and_merges_result
         ],
         predictor_builder=builder,
     )
+    assert built == []
     payload = Payload({
         "video": {"id": "video", "path": "video.avi", "duration": 2.0, "fps": 30},
         "fine_input": [({"video_id": "video#0", "feats": np.zeros((2, 4), dtype=np.float32),
@@ -251,6 +252,53 @@ def test_action_two_tower_ensemble_builds_one_model_per_action_and_merges_result
     assert len(built) == 7
     assert built[0] == ("oral", "oral.pth.tar")
     assert len(result["label"]) == 7
+
+
+def test_action_two_tower_ensemble_releases_each_action_before_loading_next():
+    """A single GPU run must not keep all seven fine-action detectors resident at once."""
+    from experiments.latency.adapters.detectors import make_action_two_tower_detector_adapter
+
+    live = 0
+    max_live = 0
+    closed = []
+
+    class Predictor:
+        def __init__(self, action_name):
+            nonlocal live, max_live
+            self.action_name = action_name
+            live += 1
+            max_live = max(max_live, live)
+
+        def __call__(self, batch, _):
+            return [{
+                "video_id": batch[0][0]["video_id"],
+                "segments": np.asarray([[0.1, 0.2]], dtype=np.float32),
+                "scores": np.asarray([0.9], dtype=np.float32),
+                "labels": np.asarray([1], dtype=np.int64),
+            }]
+
+        def close(self):
+            nonlocal live
+            live -= 1
+            closed.append(self.action_name)
+
+    adapter = make_action_two_tower_detector_adapter(
+        actions=[{"name": str(index), "checkpoint": str(index)} for index in range(7)],
+        predictor_builder=lambda action_name, _checkpoint: Predictor(action_name),
+    )
+    payload = Payload({
+        "video": {"id": "video", "path": "video.avi", "duration": 2.0, "fps": 30},
+        "fine_input": [({"video_id": "video#0", "feats": np.zeros((2, 4), dtype=np.float32),
+                         "feat_stride": 3, "feat_num_frames": 8},
+                        {"video_id": "video#0", "feats": np.zeros((1, 2, 4, 4), dtype=np.float32),
+                         "feat_stride": 3, "feat_num_frames": 8})],
+    })
+
+    adapter.run(payload, {})
+
+    assert max_live == 1
+    assert live == 0
+    assert closed == [str(index) for index in range(7)]
 
 
 def test_legacy_two_tower_factory_delegates_actions_to_action_ensemble(monkeypatch):
