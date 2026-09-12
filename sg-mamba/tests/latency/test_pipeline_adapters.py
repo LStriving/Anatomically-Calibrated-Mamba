@@ -125,8 +125,36 @@ def test_detectors_build_real_evaluator_inputs_from_feature_payload():
     assert isinstance(seen["fine"][0][1]["feats"], torch.Tensor)
     assert seen["coarse"][0]["feats"].shape == (4, 4)
     assert seen["fine"][0][0]["feats"].shape[0] == 4
-    assert seen["fine"][0][1]["feats"].shape[0] == 4
+    assert seen["fine"][0][1]["feats"].ndim == 4
     assert seen["fine"][0][0]["video_id"] == "video#0"
+
+
+def test_fine_detector_keeps_heatmap_branch_as_video_tensor():
+    """The heatmap VideoMamba tower expects C x T x H x W, not flattened C x T features."""
+    from experiments.latency.adapters.detectors import FineDetectorAdapter
+
+    payload = Payload({
+        "video": {"id": "video", "path": "video.avi", "duration": 2.0},
+        "fps": 8.0,
+        "rgb_i3d_features": np.zeros((4, 2), dtype=np.float32),
+        "flow_i3d_features": np.ones((4, 2), dtype=np.float32),
+        "skeleton_features": np.ones((4, 12, 12), dtype=np.float32),
+        "segment_centers": {"video#0": 0.5},
+    })
+    seen = {}
+
+    def fine_predictor(batch, _):
+        seen["batch"] = batch
+        return []
+
+    FineDetectorAdapter(
+        fine_predictor, feat_stride=1, num_frames=2, heatmap_size=8,
+        segment_duration=1.0,
+    ).run(payload, {})
+
+    heatmap_feats = seen["batch"][0][1]["feats"]
+    assert isinstance(heatmap_feats, torch.Tensor)
+    assert heatmap_feats.shape == (1, 8, 8, 8)
 
 
 def test_detectors_normalize_injected_evaluator_inputs_to_tensors():

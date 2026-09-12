@@ -41,12 +41,13 @@ class FineDetectorAdapter:
     name = "fine_detector"
 
     def __init__(self, predictor=None, feat_stride=3, num_frames=8, heatmap_dim=576,
-                 segment_duration=4.004):
+                 segment_duration=4.004, heatmap_size=None):
         self.predictor = predictor
         self.feat_stride = feat_stride
         self.num_frames = num_frames
         self.heatmap_dim = heatmap_dim
         self.segment_duration = segment_duration
+        self.heatmap_size = heatmap_size
         self.weights_loaded = getattr(predictor, "weights_loaded", None)
         self.checkpoint_warnings = list(getattr(predictor, "checkpoint_warnings", []))
 
@@ -62,7 +63,7 @@ class FineDetectorAdapter:
         if fine_input is None:
             fine_input = _build_two_tower_input(
                 payload, self.feat_stride, self.num_frames, self.heatmap_dim,
-                self.segment_duration,
+                self.segment_duration, self.heatmap_size,
             )
         else:
             fine_input = _normalize_two_tower_input(fine_input)
@@ -139,6 +140,7 @@ def make_two_tower_detector_adapter(config, config2, checkpoint, tower_name,
         num_frames=config["dataset"].get("num_frames", 8),
         heatmap_dim=config2["dataset"].get("input_dim", 576),
         segment_duration=config.get("seg_duration", 4.004),
+        heatmap_size=_heatmap_size_from_config(config2),
     )
     _copy_weight_status(adapter, model)
     return adapter
@@ -166,7 +168,8 @@ def make_two_tower_detector_from_config(config_path, config2_path, checkpoint=No
 
 def make_action_two_tower_detector_adapter(actions, predictor_builder=None,
                                            feat_stride=3, num_frames=8,
-                                           heatmap_dim=576, segment_duration=4.004):
+                                           heatmap_dim=576, segment_duration=4.004,
+                                           heatmap_size=None):
     """Build a fine detector from the seven action-specific stage-2 models."""
     if not isinstance(actions, (list, tuple)) or len(actions) != 7:
         raise StructuralRunError("Action two-tower fine detector requires exactly 7 action models")
@@ -189,6 +192,7 @@ def make_action_two_tower_detector_adapter(actions, predictor_builder=None,
         num_frames=num_frames,
         heatmap_dim=heatmap_dim,
         segment_duration=segment_duration,
+        heatmap_size=heatmap_size,
     )
     adapter.weights_loaded = all(weights_loaded) if weights_loaded else None
     adapter.checkpoint_warnings = warnings_by_action
@@ -218,6 +222,7 @@ def make_action_two_tower_detector_from_config(config_path, config2_path, action
         num_frames=config["dataset"].get("num_frames", 8),
         heatmap_dim=config2["dataset"].get("input_dim", 576),
         segment_duration=config.get("seg_duration", 4.004),
+        heatmap_size=_heatmap_size_from_config(config2),
     )
 
 
@@ -324,12 +329,12 @@ def _build_visual_input(payload, feat_stride, num_frames):
     return [_evaluator_item(payload, features, feat_stride, num_frames)]
 
 
-def _build_two_tower_input(payload, feat_stride, num_frames, heatmap_dim, segment_duration):
+def _build_two_tower_input(payload, feat_stride, num_frames, heatmap_dim, segment_duration, heatmap_size=None):
     visual = _build_visual_input(payload, feat_stride, num_frames)[0]
     heatmap = np.asarray(payload.require("skeleton_features"), dtype=np.float32)
     if heatmap.ndim != 3:
         raise StructuralRunError("skeleton_features must have shape (time, height, width)")
-    heatmap = _resize_heatmap_features(heatmap, heatmap_dim)
+    heatmap = _resize_heatmap_frames(heatmap, heatmap_size or _square_size(heatmap_dim))
     centers = payload.values.get("segment_centers") or {
         payload.require("video")["id"] + "#0": 0.0
     }
@@ -340,8 +345,8 @@ def _build_two_tower_input(payload, feat_stride, num_frames, heatmap_dim, segmen
         pairs.append((
             _evaluator_item(payload, visual_clip, feat_stride, num_frames, video_id=segment_id,
                             duration=segment_duration),
-            _evaluator_item(payload, heatmap_clip, feat_stride, num_frames, video_id=segment_id,
-                            duration=segment_duration),
+            _heatmap_evaluator_item(payload, heatmap_clip, feat_stride, num_frames, video_id=segment_id,
+                                    duration=segment_duration),
         ))
     return pairs
 
@@ -365,6 +370,13 @@ def _evaluator_item(payload, time_features, feat_stride, num_frames, video_id=No
     }
 
 
+def _heatmap_evaluator_item(payload, time_features, feat_stride, num_frames, video_id=None, duration=None):
+    item = _evaluator_item(payload, np.zeros((len(time_features), 1), dtype=np.float32),
+                           feat_stride, num_frames, video_id=video_id, duration=duration)
+    item["feats"] = _as_feature_tensor(np.asarray(time_features, dtype=np.float32)[None, ...])
+    return item
+
+
 def _clip_features(features, center, payload, feat_stride, segment_duration):
     features = np.asarray(features, dtype=np.float32)
     fps = float(payload.values.get("fps", payload.require("video").get("fps", 1.0)))
@@ -376,20 +388,29 @@ def _clip_features(features, center, payload, feat_stride, segment_duration):
     right_pad = max(0, stop - len(features))
     clipped = features[max(0, start):min(len(features), stop)]
     if left_pad or right_pad:
-        clipped = np.pad(clipped, ((left_pad, right_pad), (0, 0)), mode="edge")
+        clipped = np.pad(clipped, [(left_pad, right_pad)] + [(0, 0)] * (features.ndim - 1), mode="edge")
     return clipped
 
 
-def _resize_heatmap_features(features, output_dim):
+def _square_size(output_dim):
     side = int(round(output_dim ** 0.5))
     if side * side != output_dim:
         raise StructuralRunError("heatmap input_dim must be a square feature size")
+    return side
+
+
+def _resize_heatmap_frames(features, side):
     import torch
     import torch.nn.functional as functional
 
     values = torch.from_numpy(features).unsqueeze(1)
-    values = functional.interpolate(values, size=(side, side), mode="bilinear", align_corners=False)
-    return values[:, 0].reshape(len(features), output_dim).numpy()
+    return functional.interpolate(values, size=(side, side), mode="bilinear", align_corners=False)[:, 0].numpy()
+
+
+def _heatmap_size_from_config(config):
+    dataset = config.get("dataset", {})
+    video_stem = config.get("video_stem", {})
+    return dataset.get("resize_to") or video_stem.get("image_size")
 
 
 def _segment_centers(results, payload):
