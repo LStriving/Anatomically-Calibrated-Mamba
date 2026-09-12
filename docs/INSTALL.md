@@ -45,12 +45,12 @@ conda install -c "nvidia/label/cuda-11.8.0" cuda-toolkit
 # pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu118
 # CUDA 12.1
 # pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu121
-
 ```
 
 ### Install Mamba
 
 Note that these steps need to be reinstalled if you change Torch or CUDA versions.
+
 ```bash
 
 
@@ -61,9 +61,10 @@ cd ../mamba
 pip install -e . # the core Mamba package. (you should not run `pip install mamba-ssm` here since it is different from the original mamba-ssm package)
 ```
 
-### Install other dependencies 
+### Install other dependencies
 
 #### NMS
+
 ```bash
 cd ../sg-mamba/libs/utils
 python setup.py install --user
@@ -73,9 +74,8 @@ python setup.py install --user
 
 ```bash
 conda install ffmpeg -c conda-forge -y
-pip install opencv-python scikit-video numpy==1.23.5 opencv-contrib-python matplotlib pandas fairscale timm calflops pykalman joblib h5py mmengine tensorboard
+pip install opencv-python scikit-video numpy==1.23.5 opencv-contrib-python matplotlib pandas fairscale timm calflops pykalman joblib h5py mmengine tensorboard dotenv
 ```
-
 
 ```bash
 # set the PYTHONPATH
