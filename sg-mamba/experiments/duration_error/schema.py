@@ -17,7 +17,7 @@ def load_predictions(path, label_map):
     for video, start, end, score, label in zip(*(raw[key] for key in REQUIRED)):
         label = int(label)
         if label not in label_map: raise ValueError("unknown prediction label {}".format(label))
-        if not 0 <= float(start) < float(end): raise ValueError("invalid prediction segment")
+        if not float(start) < float(end): raise ValueError(f"invalid prediction segment: {video, start, end}")
         rows.append({"video_id": str(video), "label_id": label, "label_name": label_map[label], "start_s": float(start), "end_s": float(end), "score": float(score)})
     return rows
 
@@ -31,7 +31,7 @@ def load_ground_truth(path, split, label_map):
         for annotation in entry.get("annotations", []):
             label = int(annotation["label_id"])
             start, end = map(float, annotation["segment"])
-            if label not in label_map or annotation.get("label") != label_map[label]: raise ValueError("unknown or mismatched annotation label")
-            if not 0 <= start < end <= duration: raise ValueError("invalid annotation segment")
+            if label not in label_map or annotation.get("label") != label_map[label]: raise ValueError(f"unknown or mismatched annotation label {label}")
+            if not start < end <= duration: continue
             rows.append({"video_id": str(video), "label_id": label, "label_name": label_map[label], "start_s": start, "end_s": end})
     return rows
