@@ -371,6 +371,54 @@ def test_action_two_tower_ensemble_chunks_segments_within_each_action():
     assert batch_sizes == [2, 2, 1] * 7
 
 
+def test_action_two_tower_ensemble_moves_action_outputs_to_cpu_before_accumulating():
+    """Keeping CUDA result tensors until all seven actions finish can OOM later actions."""
+    from experiments.latency.adapters.detectors import make_action_two_tower_detector_adapter
+
+    class FakeCudaTensor:
+        def __init__(self, name):
+            self.name = name
+            self.moved_to_cpu = False
+
+        def detach(self):
+            return self
+
+        def cpu(self):
+            self.moved_to_cpu = True
+            return self
+
+    tensors = []
+
+    class Predictor:
+        def __call__(self, batch, _):
+            segments = FakeCudaTensor("segments")
+            scores = FakeCudaTensor("scores")
+            labels = FakeCudaTensor("labels")
+            tensors.extend([segments, scores, labels])
+            return [{"video_id": batch[0][0]["video_id"], "segments": segments,
+                     "scores": scores, "labels": labels}]
+
+        def close(self):
+            return None
+
+    adapter = make_action_two_tower_detector_adapter(
+        actions=[{"name": str(index), "checkpoint": str(index)} for index in range(7)],
+        predictor_builder=lambda _action_name, _checkpoint: Predictor(),
+    )
+    payload = Payload({
+        "video": {"id": "video", "path": "video.avi", "duration": 2.0, "fps": 30},
+        "fine_input": [({"video_id": "video#0", "feats": np.zeros((2, 4), dtype=np.float32),
+                         "feat_stride": 3, "feat_num_frames": 8},
+                        {"video_id": "video#0", "feats": np.zeros((1, 2, 4, 4), dtype=np.float32),
+                         "feat_stride": 3, "feat_num_frames": 8})],
+    })
+
+    adapter.predictor(payload.require("fine_input"), {})
+
+    assert tensors
+    assert all(tensor.moved_to_cpu for tensor in tensors)
+
+
 def test_legacy_two_tower_factory_delegates_actions_to_action_ensemble(monkeypatch):
     """Older configs may keep the single-model factory path while adding action checkpoints."""
     from experiments.latency.adapters import detectors

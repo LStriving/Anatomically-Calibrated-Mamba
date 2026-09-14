@@ -255,7 +255,7 @@ class _ActionTwoTowerEnsemble:
                         action_results = [action_results]
                     if not isinstance(action_results, list):
                         raise StructuralRunError("Action model {} returned non-list results".format(action["name"]))
-                    results.extend(action_results)
+                    results.extend(_results_to_cpu(action_results))
                     _release_cuda_cache()
                 action_loaded = getattr(predictor, "weights_loaded", None)
                 if action_loaded is not None:
@@ -323,6 +323,22 @@ def _positive_int(value, name):
     if parsed < 1:
         raise StructuralRunError("{} must be a positive integer".format(name))
     return parsed
+
+
+def _results_to_cpu(results):
+    return [_result_to_cpu(result) for result in results]
+
+
+def _result_to_cpu(value):
+    if hasattr(value, "detach"):
+        return value.detach().cpu()
+    if isinstance(value, dict):
+        return {key: _result_to_cpu(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_result_to_cpu(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_result_to_cpu(item) for item in value)
+    return value
 
 
 def _prepare_model(model, checkpoint, weights_mode, device, devices=None):
