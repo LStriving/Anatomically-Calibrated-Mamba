@@ -45,7 +45,8 @@ def build_adapters(config):
             adapters.append(VideoDecodeAdapter(max_frames=config.get("max_frames")))
         elif stage == "flow_extract":
             adapters.append(FlowExtractAdapter(
-                width=config.get("flow_width", 128), height=config.get("flow_height", 128)
+                width=config.get("flow_width", 128), height=config.get("flow_height", 128),
+                use_gpu=config.get("flow_use_gpu", False)
             ))
         else:
             raise StructuralRunError(

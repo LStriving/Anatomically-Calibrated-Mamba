@@ -2,6 +2,7 @@
 from copy import deepcopy
 import gc
 from pathlib import Path
+from time import perf_counter_ns
 import warnings
 import numpy as np
 
@@ -72,9 +73,14 @@ class FineDetectorAdapter:
         raw_predictions = self.predictor(fine_input, context)
         self.weights_loaded = getattr(self.predictor, "weights_loaded", self.weights_loaded)
         self.checkpoint_warnings = list(getattr(self.predictor, "checkpoint_warnings", self.checkpoint_warnings))
-        return payload.with_value("fine_input", fine_input).with_value(
+        result = (payload.with_value("fine_input", fine_input).with_value(
             "fine_predictions", _prediction_columns(raw_predictions, fine_input, payload)
-        )
+        ))
+        action_timings = getattr(self.predictor, "last_action_timings_ms", None)
+        if action_timings:
+            result = result.with_value("fine_detector_action_timings_ms", dict(action_timings))
+            result = result.with_value("fine_detector_max_action_ms", max(action_timings.values()))
+        return result
 
 
 class PostprocessAdapter:
@@ -241,12 +247,15 @@ class _ActionTwoTowerEnsemble:
         self.batch_size = _positive_int(batch_size, "action_batch_size")
         self.weights_loaded = None
         self.checkpoint_warnings = []
+        self.last_action_timings_ms = {}
 
     def __call__(self, batch, context):
         results = []
         loaded = []
         warnings_seen = []
+        action_timings = {}
         for action in self.actions:
+            action_started = perf_counter_ns()
             predictor = self.predictor_builder(action["name"], action["checkpoint"])
             try:
                 for chunk in _chunks(batch, self.batch_size):
@@ -263,8 +272,10 @@ class _ActionTwoTowerEnsemble:
                 warnings_seen.extend(getattr(predictor, "checkpoint_warnings", []))
             finally:
                 _release_predictor(predictor)
+                action_timings[action["name"]] = (perf_counter_ns() - action_started) / 1_000_000
         self.weights_loaded = all(loaded) if loaded else None
         self.checkpoint_warnings = warnings_seen
+        self.last_action_timings_ms = action_timings
         return results
 
 

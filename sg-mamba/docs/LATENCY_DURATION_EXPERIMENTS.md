@@ -134,12 +134,7 @@ conda run -n pytorch python -m experiments.latency.cli `
 正式 benchmark 前确认 checkpoint 和 manifest 存在，并固定 manifest、配置、代码 commit 和环境：
 
 ```powershell
-conda run -n pytorch python -m experiments.latency.cli `
-  --manifest path/to/test_manifest.json `
-  --config configs/latency_benchmark.example.yaml `
-  --mode benchmark `
-  --weights-mode required `
-  --output-dir outputs/latency_benchmark
+conda run -n pytorch python -m experiments.latency.cli --manifest data/swallow/videos/test_videos_1O.json --config configs/latency_benchmark.yaml --mode benchmark --weights-mode required --output-dir outputs/latency_benchmark
 ```
 
 运行前检查资源：

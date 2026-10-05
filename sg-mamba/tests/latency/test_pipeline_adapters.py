@@ -28,6 +28,58 @@ def test_i3d_adapter_emits_rgb_and_flow_features_from_eight_frame_windows():
     assert np.allclose(result.require("rgb_i3d_features"), -1 / 255, atol=1e-6)
 
 
+def test_i3d_adapter_extracts_windows_in_bounded_batches():
+    """Large videos must not send every temporal window through I3D at once."""
+    from experiments.latency.adapters.i3d import I3DExtractAdapter
+
+    class RecordingModel(_FeatureModel):
+        def __init__(self):
+            self.batch_sizes = []
+
+        def extract_features(self, batch):
+            self.batch_sizes.append(batch.shape[0])
+            return super().extract_features(batch)
+
+    rgb_model = RecordingModel()
+    flow_model = RecordingModel()
+    frames = np.zeros((18, 4, 4, 3), dtype=np.uint8)
+    flow = np.zeros((18, 4, 4, 2), dtype=np.float32)
+    adapter = I3DExtractAdapter(
+        rgb_model, flow_model, image_size=4, window_size=8, window_step=3, window_batch_size=3,
+    )
+
+    adapter.run(Payload({"frames": frames, "flow": flow}), {})
+
+    assert rgb_model.batch_sizes == [3, 1]
+    assert flow_model.batch_sizes == [3, 1]
+
+
+def test_i3d_adapter_supports_loading_all_windows_at_once():
+    """A batch size of -1 means one GPU batch per video, not an invalid range step."""
+    from experiments.latency.adapters.i3d import I3DExtractAdapter
+
+    class RecordingModel(_FeatureModel):
+        def __init__(self):
+            self.batch_sizes = []
+
+        def extract_features(self, batch):
+            self.batch_sizes.append(batch.shape[0])
+            return super().extract_features(batch)
+
+    rgb_model = RecordingModel()
+    flow_model = RecordingModel()
+    frames = np.zeros((18, 4, 4, 3), dtype=np.uint8)
+    flow = np.zeros((18, 4, 4, 2), dtype=np.float32)
+    adapter = I3DExtractAdapter(
+        rgb_model, flow_model, image_size=4, window_size=8, window_step=3, window_batch_size=-1,
+    )
+
+    adapter.run(Payload({"frames": frames, "flow": flow}), {})
+
+    assert rgb_model.batch_sizes == [4]
+    assert flow_model.batch_sizes == [4]
+
+
 def test_i3d_factory_rejects_missing_required_checkpoints(tmp_path):
     """Treating absent required weights as random weights would invalidate a benchmark run."""
     from experiments.latency.adapters.i3d import make_i3d_adapter
@@ -320,11 +372,14 @@ def test_action_two_tower_ensemble_releases_each_action_before_loading_next():
                          "feat_stride": 3, "feat_num_frames": 8})],
     })
 
-    adapter.run(payload, {})
+    result_payload = adapter.run(payload, {})
 
     assert max_live == 1
     assert live == 0
     assert closed == [str(index) for index in range(7)]
+    action_timings = result_payload.require("fine_detector_action_timings_ms")
+    assert list(action_timings) == [str(index) for index in range(7)]
+    assert result_payload.require("fine_detector_max_action_ms") == max(action_timings.values())
 
 
 def test_action_two_tower_ensemble_chunks_segments_within_each_action():

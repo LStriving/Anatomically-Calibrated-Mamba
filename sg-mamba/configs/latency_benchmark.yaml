@@ -1,0 +1,75 @@
+# Supply real model/predictor instances through the listed factory kwargs.
+# Construction, checkpoint loading, and warm-up occur outside per-video timing.
+mode: benchmark
+weights_mode: required
+stages:
+  - name: decode
+    factory: experiments.latency.adapters.video:VideoDecodeAdapter
+    kwargs: {}
+  - name: flow_extract
+    factory: experiments.latency.adapters.flow:FlowExtractAdapter
+    kwargs:
+      width: 128
+      height: 128
+  - name: i3d_extract
+    factory: experiments.latency.adapters.i3d:make_i3d_adapter
+    kwargs:
+      rgb_checkpoint: ckpts/pretrained_swallow_i3d.pth
+      flow_checkpoint: ckpts/flow_imagenet.pt
+      weights_mode: required
+      window_size: 8
+      window_step: 3
+      window_batch_size: -1
+  - name: coarse_detector
+    factory: experiments.latency.adapters.detectors:make_coarse_detector_from_config
+    kwargs:
+      config_path: configs/mamba_swallow_i3d_eval_stage1.yaml
+      checkpoint: ckpts/epoch_024_0.82621.pth.tar
+      weights_mode: required
+  - name: keypoint_extract
+    factory: experiments.latency.adapters.keypoints:make_keypoint_adapter
+    kwargs:
+      # Matches libs/core/config.py; this traced model is required for a real run.
+      model_path: ckpts/best_model_trace.pt
+      sigma: 4
+  - name: kalman_smooth
+    factory: experiments.latency.adapters.keypoints:KalmanSmoothAdapter
+    kwargs: {}
+  - name: skeleton_encode
+    factory: experiments.latency.adapters.keypoints:make_skeleton_adapter
+    kwargs:
+      # Mirrors VideoKeypointProcessor.infer_heatmaps after the separate Kalman stage.
+      sigma: 4
+      crop_mode: auto
+  - name: fine_detector
+    factory: experiments.latency.adapters.detectors:make_two_tower_detector_from_config
+    kwargs:
+      config_path: configs/sg-mamba-stage2.yaml
+      config2_path: configs/sg-mamba-stage2-heatmap.yaml
+      checkpoint: ckpts/
+      tower_name: CrossMambaEarlyFusion
+      weights_mode: required
+      action_batch_size: 1
+      actions:
+        - name: OralDelivery
+          checkpoint: ckpts/mamba_swallow_i3d_secondstage_2tower_crossmamba_l3_ep30_acu4_loadheatmap_channelagg_heatmap_secondstage_videomamba_l3_avgtoken_ep45_sigma4_hid576_noact_OralDelivery_load_heatmap_16_0.0001/epoch_014_0.89763.pth.tar
+        - name: SoftPalateLift
+          checkpoint: ckpts/mamba_swallow_i3d_secondstage_2tower_crossmamba_l3_ep30_acu4_loadheatmap_channelagg_heatmap_secondstage_videomamba_l3_avgtoken_ep45_sigma4_hid576_noact_SoftPalateLift_load_heatmap_16_0.0001/epoch_031_0.96925.pth.tar
+        - name: HyoidExercise
+          checkpoint: ckpts/mamba_swallow_i3d_secondstage_2tower_crossmamba_l3_ep30_acu4_loadheatmap_channelagg_heatmap_secondstage_videomamba_l3_avgtoken_ep45_sigma4_hid576_noact_HyoidExercise_load_heatmap_16_0.0001/epoch_034_0.93676.pth.tar
+        - name: UESOpen
+          checkpoint: ckpts/mamba_swallow_i3d_secondstage_2tower_crossmamba_l3_ep30_acu4_loadheatmap_channelagg_heatmap_secondstage_videomamba_l3_avgtoken_ep45_sigma4_hid576_noact_UESOpen_load_heatmap_16_0.0001/epoch_033_0.99294.pth.tar
+        - name: ThroatSwallow
+          checkpoint: ckpts/mamba_swallow_i3d_secondstage_2tower_crossmamba_l3_ep30_acu4_loadheatmap_channelagg_heatmap_secondstage_videomamba_l3_avgtoken_ep45_sigma4_hid576_noact_ThroatSwallow_load_heatmap_16_0.0001/epoch_012_0.46851.pth.tar
+        - name: ThroatTransport
+          checkpoint: ckpts/mamba_swallow_i3d_secondstage_2tower_crossmamba_l3_ep30_acu4_loadheatmap_channelagg_heatmap_secondstage_videomamba_l3_avgtoken_ep45_sigma4_hid576_noact_ThroatTransport_load_heatmap_16_0.0001/epoch_028_0.96772.pth.tar
+        - name: LaryngealVestibuleClosure
+          checkpoint: ckpts/mamba_swallow_i3d_secondstage_2tower_crossmamba_l3_ep30_acu4_loadheatmap_channelagg_heatmap_secondstage_videomamba_l3_avgtoken_ep45_sigma4_hid576_noact_LaryngealVestibuleClosure_load_heatmap_16_0.0001/epoch_029_0.80851.pth.tar
+  
+  - name: postprocess
+    factory: experiments.latency.adapters.detectors:PostprocessAdapter
+    kwargs:
+      segment_duration: 4.004
+cache:
+  enabled: false
+  dir: outputs/latency_cache

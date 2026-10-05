@@ -17,6 +17,9 @@ stages:
       rgb_checkpoint: pretrained/pretrained_swallow_i3d.pth
       flow_checkpoint: pretrained/flow_imagenet.pt
       weights_mode: required
+      window_size: 8
+      window_step: 3
+      window_batch_size: 48
   - name: coarse_detector
     factory: experiments.latency.adapters.detectors:make_coarse_detector_from_config
     kwargs:

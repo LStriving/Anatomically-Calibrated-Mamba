@@ -48,10 +48,11 @@ def run_benchmark(config, manifest, adapters, output_dir):
                     payload = adapter.run(payload, {"config": config, "video": video})
                     _cuda_synchronize()
                     timings[stage + "_ms"] = (perf_counter_ns() - start) / 1_000_000
+                    _add_adapter_timings(timings, stage, payload)
                     if cache is not None:
                         cache.save(key, payload)
                 peak_gpu_memory = _peak_gpu_memory()
-                total_ms = sum(value for key, value in timings.items() if key.endswith("_ms"))
+                total_ms = sum(timings.get(adapter.name + "_ms", 0.0) for adapter in adapters)
                 successes.append({"video_id": video["id"], "stage_timings_ms": timings,
                                   "peak_gpu_memory_bytes": peak_gpu_memory})
                 rows.append({"video_id": video["id"], "input_path": video["path"],
@@ -213,3 +214,14 @@ def _peak_gpu_memory():
     except (ImportError, RuntimeError):
         return None
     return None
+
+
+def _add_adapter_timings(timings, stage, payload):
+    action_timings = payload.values.get(stage + "_action_timings_ms")
+    if not isinstance(action_timings, dict):
+        return
+    for action_name, duration_ms in action_timings.items():
+        timings["{}_{}_ms".format(stage, action_name)] = float(duration_ms)
+    max_duration = payload.values.get(stage + "_max_action_ms")
+    if max_duration is not None:
+        timings[stage + "_max_action_ms"] = float(max_duration)
